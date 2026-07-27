@@ -1,10 +1,9 @@
 <script setup lang="ts"></script>
 
 <template>
-  <h1>You did it!</h1>
+  <h1>Welcome to git Arena!</h1>
   <p>
-    Visit <a href="https://vuejs.org/" target="_blank" rel="noopener">vuejs.org</a> to read the
-    documentation
+    This is a web application that allows you to excercise your git skills in a fun and interactive way. You can create your own challenges, compete with other users, and track your progress over time.
   </p>
 </template>
 
