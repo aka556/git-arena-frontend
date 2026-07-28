@@ -1,6 +1,25 @@
+<div align="center">
+
 # git-arena-frontend
 
-git-arena 的前端。**图形化 DAG 视图 + 真实命令行终端共存**，让使用者直观看到每一条 git 命令如何改变提交图，进而看懂版本控制、练会多人协作。
+**图形化 DAG 视图 + 真实命令行终端共存** — 直观看到每一条 git 命令如何改变提交图，进而看懂版本控制、练会多人协作。
+
+<p>
+  <img alt="Vue" src="https://img.shields.io/badge/Vue-3.5.38-4FC08D?style=flat-square&logo=vuedotjs&logoColor=white">
+  <img alt="Vite" src="https://img.shields.io/badge/Vite-6.0-646CFF?style=flat-square&logo=vite&logoColor=white">
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5.6-3178C6?style=flat-square&logo=typescript&logoColor=white">
+  <img alt="Pinia" src="https://img.shields.io/badge/Pinia-3.0-FFD859?style=flat-square&logo=vue.js&logoColor=black">
+  <img alt="Vue Router" src="https://img.shields.io/badge/Vue%20Router-4.5-42B883?style=flat-square&logo=vuedotjs&logoColor=white">
+</p>
+<p>
+  <img alt="Ant Design Vue" src="https://img.shields.io/badge/Ant%20Design%20Vue-4.2-0170FE?style=flat-square&logo=antdesign&logoColor=white">
+  <img alt="D3.js" src="https://img.shields.io/badge/D3.js-7.9-F9A03C?style=flat-square&logo=d3dotjs&logoColor=white">
+  <img alt="xterm.js" src="https://img.shields.io/badge/xterm.js-6.0-2E3A46?style=flat-square&logo=gnometerminal&logoColor=white">
+  <img alt="Axios" src="https://img.shields.io/badge/Axios-1.18-5A29E4?style=flat-square&logo=axios&logoColor=white">
+  <img alt="Node" src="https://img.shields.io/badge/Node-20.15.0-339933?style=flat-square&logo=nodedotjs&logoColor=white">
+</p>
+
+</div>
 
 > 本模块是 git-arena 的前端子项目。项目整体愿景、架构与契约以仓库根目录 [`CLAUDE.md`](../CLAUDE.md) 为准，本文只讲前端。
 
