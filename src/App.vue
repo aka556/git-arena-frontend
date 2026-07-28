@@ -1,10 +1,28 @@
-<script setup lang="ts"></script>
+<script setup lang="ts">
+/**
+ * 应用根组件。用 antd ConfigProvider 统一主题 design token（§6.2：主题定制走 token，禁止散落覆盖 .ant-*）。
+ */
+import { ConfigProvider } from 'ant-design-vue'
+
+const theme = {
+  token: {
+    colorPrimary: '#2f80ed',
+    borderRadius: 4,
+  },
+}
+</script>
 
 <template>
-  <h1>Welcome to git Arena!</h1>
-  <p>
-    This is a web application that allows you to excercise your git skills in a fun and interactive way. You can create your own challenges, compete with other users, and track your progress over time.
-  </p>
+  <ConfigProvider :theme="theme">
+    <RouterView />
+  </ConfigProvider>
 </template>
 
-<style scoped></style>
+<style>
+html,
+body,
+#app {
+  margin: 0;
+  height: 100%;
+}
+</style>
