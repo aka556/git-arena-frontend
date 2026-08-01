@@ -2,12 +2,13 @@
 /**
  * 工作台页面（CLAUDE.md §6.1 views）。图视图与终端视图并存，共用 store 里同一份 GitGraph 快照。
  *
- * <p>本页是命令的<b>唯一编排点</b>：终端回车与面板按钮都汇到 {@link execute}，经 store.exec 走同一后端
- * 链路（§3 黄金法则），再把结果写回终端；图视图通过 store.graph 响应式刷新。
+ * <p>本页是命令的<b>唯一编排点</b>：终端回车与面板按钮都汇到统一执行链路（§3 黄金法则）。
+ * 关卡模式下并排渲染"当前图 | 目标图"（§6.3 对照展示，两图共用同一确定性布局），校验走后端结构匹配。
  */
 import { ref, onMounted } from 'vue'
-import { Button, message } from 'ant-design-vue'
+import { Button, Select, Modal, message } from 'ant-design-vue'
 import { useSessionStore } from '@/stores/session'
+import type { LevelSummary } from '@/types/level'
 import GitGraphView from '@/components/graph/GitGraphView.vue'
 import TerminalView from '@/components/terminal/TerminalView.vue'
 import OperationPanel from '@/components/panel/OperationPanel.vue'
@@ -15,24 +16,62 @@ import OperationPanel from '@/components/panel/OperationPanel.vue'
 const store = useSessionStore()
 const terminalRef = ref<InstanceType<typeof TerminalView> | null>(null)
 const starting = ref(false)
+const selectedSlug = ref<string | undefined>(undefined)
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
 
-async function boot(): Promise<void> {
+async function bootFreeSandbox(): Promise<void> {
   starting.value = true
   try {
     await store.initSession()
+    selectedSlug.value = undefined
     terminalRef.value?.boot([
-      'git-arena · M1 骨架',
-      '试试： git init → touch a.txt → git add . → git commit -m "init" → git log',
+      'git-arena · 自由沙盒',
+      '试试： git init → touch a.txt → git add . → git commit -m "init" → git branch/switch/merge',
     ])
   } catch (e) {
     message.error(errMsg(e))
     terminalRef.value?.writeError('会话创建失败：' + errMsg(e))
   } finally {
     starting.value = false
+  }
+}
+
+async function onStartLevel(): Promise<void> {
+  const level = store.levels.find((l: LevelSummary) => l.slug === selectedSlug.value)
+  if (!level) {
+    message.warning('请先选择一个关卡')
+    return
+  }
+  starting.value = true
+  try {
+    await store.startLevel(level)
+    terminalRef.value?.boot([
+      `关卡：${level.title}（难度 ${'★'.repeat(level.difficulty)}）`,
+      '让"当前图"变成右侧"目标图"，然后点「校验」。',
+    ])
+  } catch (e) {
+    message.error(errMsg(e))
+  } finally {
+    starting.value = false
+  }
+}
+
+async function onValidate(): Promise<void> {
+  try {
+    const res = await store.validate()
+    if (res.passed) {
+      Modal.success({ title: '🎉 通关！', content: '仓库结构与目标一致。' })
+    } else {
+      Modal.warning({
+        title: '还没达成目标',
+        content: () => res.reasons.map((r) => '· ' + r).join('\n'),
+      })
+    }
+  } catch (e) {
+    message.error(errMsg(e))
   }
 }
 
@@ -60,23 +99,47 @@ async function onPanelRun(cmd: string): Promise<void> {
 async function onReset(): Promise<void> {
   try {
     await store.reset()
-    terminalRef.value?.boot(['--- 沙盒已重置 ---'])
-    message.success('已重置到空仓库')
+    terminalRef.value?.boot([store.activeLevel ? '--- 关卡已重开 ---' : '--- 沙盒已重置 ---'])
+    message.success(store.activeLevel ? '已重开本关' : '已重置到空仓库')
   } catch (e) {
     message.error(errMsg(e))
   }
 }
 
-onMounted(boot)
+onMounted(async () => {
+  try {
+    await store.loadLevels()
+  } catch (e) {
+    message.warning('关卡列表加载失败：' + errMsg(e))
+  }
+  await bootFreeSandbox()
+})
 </script>
 
 <template>
   <div class="workbench">
     <header class="toolbar">
       <div class="brand">git-arena</div>
+
+      <Select
+        v-model:value="selectedSlug"
+        class="level-select"
+        size="small"
+        placeholder="选择关卡…"
+        :options="store.levels.map((l: LevelSummary) => ({
+          value: l.slug,
+          label: `[${l.category}] ${l.title} ${'★'.repeat(l.difficulty)}`,
+        }))"
+      />
+      <Button size="small" type="primary" :loading="starting" @click="onStartLevel">
+        {{ store.activeLevel && store.activeLevel.slug === selectedSlug ? '重开关卡' : '开始关卡' }}
+      </Button>
+      <Button v-if="store.activeLevel" size="small" @click="onValidate">校验</Button>
+
       <div class="spacer"></div>
+      <span v-if="store.activeLevel" class="level-badge">{{ store.activeLevel.title }}</span>
       <span class="session">会话：{{ store.sessionId ? store.sessionId.slice(0, 8) : '未连接' }}</span>
-      <Button size="small" :loading="starting" @click="boot">新建会话</Button>
+      <Button size="small" :loading="starting" @click="bootFreeSandbox">自由沙盒</Button>
     </header>
 
     <div class="body">
@@ -84,8 +147,15 @@ onMounted(boot)
         <OperationPanel :disabled="!store.sessionId || store.busy" @run="onPanelRun" @reset="onReset" />
       </aside>
 
-      <main class="graph-col">
-        <GitGraphView :graph="store.graph" />
+      <main class="graph-col" :class="{ split: store.activeLevel }">
+        <section class="graph-pane">
+          <div v-if="store.activeLevel" class="pane-title">当前图</div>
+          <GitGraphView :graph="store.graph" />
+        </section>
+        <section v-if="store.activeLevel" class="graph-pane goal-pane">
+          <div class="pane-title">目标图</div>
+          <GitGraphView :graph="store.goalGraph" />
+        </section>
       </main>
 
       <section class="terminal-col">
@@ -105,7 +175,7 @@ onMounted(boot)
 .toolbar {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   height: 48px;
   padding: 0 16px;
   background: #fff;
@@ -115,9 +185,20 @@ onMounted(boot)
   font-weight: 700;
   font-size: 16px;
   color: #2f80ed;
+  margin-right: 8px;
+}
+.level-select {
+  width: 260px;
 }
 .spacer {
   flex: 1;
+}
+.level-badge {
+  font-size: 12px;
+  color: #2f80ed;
+  background: #e8f0fe;
+  padding: 2px 8px;
+  border-radius: 4px;
 }
 .session {
   font-size: 12px;
@@ -138,10 +219,33 @@ onMounted(boot)
 .graph-col {
   flex: 1;
   min-width: 0;
-  overflow: auto;
+  display: flex;
+  overflow: hidden;
+}
+.graph-pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.goal-pane {
+  border-left: 1px dashed #cbd5e1;
+  background: #f8fafc;
+}
+.pane-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #667085;
+  padding: 6px 10px;
+  border-bottom: 1px solid #eef1f5;
+  background: #fff;
+}
+.graph-pane :deep(.graph-view) {
+  flex: 1;
 }
 .terminal-col {
-  width: 46%;
+  width: 40%;
   min-width: 360px;
   border-left: 1px solid #e8e8e8;
 }
