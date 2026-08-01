@@ -2,24 +2,38 @@
  * 会话与图状态 store（§6.2：业务状态入 Pinia）。
  *
  * <p>持有唯一的 GitGraph 快照——图视图与终端视图都从这里读，绝不各自维护状态（§3 黄金法则）。
- * 所有会改变仓库的动作都经 {@link exec}（终端与图形面板共用），保证同一执行链路。
+ * 所有会改变仓库的动作都经 {@link exec}（终端与面板共用），保证同一执行链路。
+ *
+ * <p>关卡模式：startLevel 用后端构建好的关卡沙盒<b>替换</b>当前会话，goalGraph 供目标图对照渲染
+ * （§6.3 当前图 vs 目标图并排）；validate 只读校验，不改状态。
  */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { CommandResponse, GitGraph } from '@/types/gitGraph'
+import type { LevelSummary, ValidateResponse } from '@/types/level'
 import { createSession, resetSession } from '@/api/sandbox'
 import { runCommand } from '@/api/command'
+import { listLevels, startLevel as apiStartLevel, validateLevel } from '@/api/level'
 
 export const useSessionStore = defineStore('session', () => {
   const sessionId = ref<string | null>(null)
   const graph = ref<GitGraph | null>(null)
   const busy = ref(false)
 
-  /** 新建会话，拿到初始（空）图。 */
+  /** 关卡目录（进入工作台时加载一次）。 */
+  const levels = ref<LevelSummary[]>([])
+  /** 当前进行中的关卡；null = 自由沙盒模式。 */
+  const activeLevel = ref<LevelSummary | null>(null)
+  /** 关卡目标图（只读，来自关卡 spec，非仓库快照）。 */
+  const goalGraph = ref<GitGraph | null>(null)
+
+  /** 新建自由沙盒会话（退出关卡模式）。 */
   async function initSession(): Promise<void> {
     const res = await createSession()
     sessionId.value = res.sessionId
     graph.value = res.graph
+    activeLevel.value = null
+    goalGraph.value = null
   }
 
   /**
@@ -40,12 +54,47 @@ export const useSessionStore = defineStore('session', () => {
     }
   }
 
-  /** 重置沙盒到空态。 */
+  /** 重置沙盒。关卡模式下=重开本关（重新构建 initial），自由模式=清空。 */
   async function reset(): Promise<void> {
+    if (activeLevel.value) {
+      await startLevel(activeLevel.value)
+      return
+    }
     if (!sessionId.value) return
     const res = await resetSession(sessionId.value)
     graph.value = res.graph
   }
 
-  return { sessionId, graph, busy, initSession, exec, reset }
+  async function loadLevels(): Promise<void> {
+    levels.value = await listLevels()
+  }
+
+  /** 开始/重开一个关卡：后端新建沙盒并构建 initial，本地切换会话。 */
+  async function startLevel(level: LevelSummary): Promise<void> {
+    busy.value = true
+    try {
+      const res = await apiStartLevel(level.slug)
+      sessionId.value = res.sessionId
+      graph.value = res.graph
+      goalGraph.value = res.goalGraph
+      activeLevel.value = level
+    } finally {
+      busy.value = false
+    }
+  }
+
+  /** 校验当前关卡是否达成。 */
+  async function validate(): Promise<ValidateResponse> {
+    if (!sessionId.value || !activeLevel.value) {
+      throw new Error('当前没有进行中的关卡')
+    }
+    return validateLevel(activeLevel.value.slug, sessionId.value)
+  }
+
+  return {
+    sessionId, graph, busy,
+    levels, activeLevel, goalGraph,
+    initSession, exec, reset,
+    loadLevels, startLevel, validate,
+  }
 })
