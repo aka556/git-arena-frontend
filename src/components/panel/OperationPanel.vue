@@ -181,6 +181,16 @@ function createTag(): void {
     </div>
 
     <div class="panel-section">
+      <div class="panel-title">远程</div>
+      <Space wrap>
+        <Button size="small" :disabled="props.disabled" @click="run('git fetch')">fetch</Button>
+        <Button size="small" :disabled="props.disabled" @click="run('git pull')">pull</Button>
+        <Button size="small" :disabled="props.disabled" @click="run('git push origin main')">push</Button>
+        <Button size="small" :disabled="props.disabled" @click="run('git remote -v')">远程列表</Button>
+      </Space>
+    </div>
+
+    <div class="panel-section">
       <div class="panel-title">查看</div>
       <Space wrap>
         <Button size="small" :disabled="props.disabled" @click="run('git status')">git status</Button>
