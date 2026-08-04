@@ -10,10 +10,10 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { CommandResponse, GitGraph } from '@/types/gitGraph'
-import type { LevelSummary, ValidateResponse } from '@/types/level'
+import type { LevelDetail, LevelSummary, ValidateResponse } from '@/types/level'
 import { createSession, resetSession } from '@/api/sandbox'
 import { runCommand } from '@/api/command'
-import { listLevels, startLevel as apiStartLevel, validateLevel } from '@/api/level'
+import { getLevel, listLevels, startLevel as apiStartLevel, validateLevel } from '@/api/level'
 
 export const useSessionStore = defineStore('session', () => {
   const sessionId = ref<string | null>(null)
@@ -26,6 +26,10 @@ export const useSessionStore = defineStore('session', () => {
   const activeLevel = ref<LevelSummary | null>(null)
   /** 关卡目标图（只读，来自关卡 spec，非仓库快照）。 */
   const goalGraph = ref<GitGraph | null>(null)
+  /** 当前关卡详情（说明 + 分级提示）。 */
+  const levelDetail = ref<LevelDetail | null>(null)
+  /** 已揭示的提示条数（逐级揭示；开始/重开关卡时归零）。 */
+  const revealedHints = ref(0)
 
   /** 新建自由沙盒会话（退出关卡模式）。 */
   async function initSession(): Promise<void> {
@@ -34,6 +38,8 @@ export const useSessionStore = defineStore('session', () => {
     graph.value = res.graph
     activeLevel.value = null
     goalGraph.value = null
+    levelDetail.value = null
+    revealedHints.value = 0
   }
 
   /**
@@ -69,17 +75,27 @@ export const useSessionStore = defineStore('session', () => {
     levels.value = await listLevels()
   }
 
-  /** 开始/重开一个关卡：后端新建沙盒并构建 initial，本地切换会话。 */
+  /** 开始/重开一个关卡：后端新建沙盒并构建 initial，本地切换会话；同时拉取详情（说明+提示）。 */
   async function startLevel(level: LevelSummary): Promise<void> {
     busy.value = true
     try {
-      const res = await apiStartLevel(level.slug)
+      const [res, detail] = await Promise.all([apiStartLevel(level.slug), getLevel(level.slug)])
       sessionId.value = res.sessionId
       graph.value = res.graph
       goalGraph.value = res.goalGraph
       activeLevel.value = level
+      levelDetail.value = detail
+      revealedHints.value = 0
     } finally {
       busy.value = false
+    }
+  }
+
+  /** 逐级揭示下一条提示。返回是否还有未揭示的。 */
+  function revealNextHint(): void {
+    const total = levelDetail.value?.hints.length ?? 0
+    if (revealedHints.value < total) {
+      revealedHints.value += 1
     }
   }
 
@@ -93,8 +109,8 @@ export const useSessionStore = defineStore('session', () => {
 
   return {
     sessionId, graph, busy,
-    levels, activeLevel, goalGraph,
+    levels, activeLevel, goalGraph, levelDetail, revealedHints,
     initSession, exec, reset,
-    loadLevels, startLevel, validate,
+    loadLevels, startLevel, validate, revealNextHint,
   }
 })
