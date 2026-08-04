@@ -18,11 +18,14 @@ const EDGE_COLOR = '#9aa5b1'
 const NODE_FILL = '#2f80ed'
 const HEAD_ACCENT = '#eb5757'
 const BRANCH_FILL = '#e8f0fe'
+const REMOTE_FILL = '#fff1e6'
+const REMOTE_TEXT = '#c05621'
 
 interface RefTag {
   key: string
   label: string
   isHead: boolean
+  remote?: boolean
   x: number
   y: number
 }
@@ -50,6 +53,15 @@ function buildRefTags(graph: GitGraph, positions: Map<string, { x: number; y: nu
     const at = place(t.target)
     if (!at) continue
     tags.push({ key: `tag:${t.name}`, label: `🏷 ${t.name}`, isHead: false, x: at.x, y: at.y })
+  }
+  // 远程跟踪分支（origin/main 等）：不同配色，与本地分支区分（M3 远程模拟）
+  for (const r of graph.remotes) {
+    for (const rb of r.branches) {
+      if (!rb.target) continue
+      const at = place(rb.target)
+      if (!at) continue
+      tags.push({ key: `remote:${r.name}/${rb.name}`, label: `${r.name}/${rb.name}`, isHead: false, remote: true, x: at.x, y: at.y })
+    }
   }
   // detached HEAD：化身离开分支标签，独立站在该提交上（§6.3）
   if (graph.head.type === 'detached') {
@@ -124,9 +136,9 @@ function render(): void {
   ref.attr('transform', (d) => `translate(${d.x},${d.y})`)
   ref.select('rect')
     .attr('width', (d) => d.label.length * 7 + 16)
-    .attr('fill', (d) => (d.isHead ? HEAD_ACCENT : BRANCH_FILL))
+    .attr('fill', (d) => (d.isHead ? HEAD_ACCENT : d.remote ? REMOTE_FILL : BRANCH_FILL))
   ref.select('text')
-    .attr('fill', (d) => (d.isHead ? '#fff' : '#2f80ed'))
+    .attr('fill', (d) => (d.isHead ? '#fff' : d.remote ? REMOTE_TEXT : '#2f80ed'))
     .text((d) => d.label)
 }
 
