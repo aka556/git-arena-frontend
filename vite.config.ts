@@ -6,6 +6,10 @@ import vueDevTools from 'vite-plugin-vue-devtools'
 
 // https://vite.dev/config/
 export default defineConfig({
+  // sockjs-client 引用了 Node 的 global；浏览器下映射到 globalThis（协作 WS 需要）
+  define: {
+    global: 'globalThis',
+  },
   plugins: [
     vue(),
     vueDevTools(),
@@ -22,6 +26,12 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8096',
         changeOrigin: true,
+      },
+      // 协作 WebSocket（SockJS）握手与传输
+      '/ws': {
+        target: 'http://localhost:8096',
+        changeOrigin: true,
+        ws: true,
       },
     },
   },
