@@ -12,11 +12,13 @@ import type { LevelSummary } from '@/types/level'
 import GitGraphView from '@/components/graph/GitGraphView.vue'
 import TerminalView from '@/components/terminal/TerminalView.vue'
 import OperationPanel from '@/components/panel/OperationPanel.vue'
+import LevelHintDrawer from '@/components/level/LevelHintDrawer.vue'
 
 const store = useSessionStore()
 const terminalRef = ref<InstanceType<typeof TerminalView> | null>(null)
 const starting = ref(false)
 const selectedSlug = ref<string | undefined>(undefined)
+const hintOpen = ref(false)
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
@@ -120,6 +122,7 @@ onMounted(async () => {
   <div class="workbench">
     <header class="toolbar">
       <div class="brand">git-arena</div>
+      <RouterLink to="/rooms" class="nav-link">协作房间 →</RouterLink>
 
       <Select
         v-model:value="selectedSlug"
@@ -135,6 +138,9 @@ onMounted(async () => {
         {{ store.activeLevel && store.activeLevel.slug === selectedSlug ? '重开关卡' : '开始关卡' }}
       </Button>
       <Button v-if="store.activeLevel" size="small" @click="onValidate">校验</Button>
+      <Button v-if="store.activeLevel" size="small" @click="hintOpen = true">
+        提示{{ store.revealedHints > 0 ? ` ${store.revealedHints}/${store.levelDetail?.hints.length ?? 0}` : '' }}
+      </Button>
 
       <div class="spacer"></div>
       <span v-if="store.activeLevel" class="level-badge">{{ store.activeLevel.title }}</span>
@@ -162,6 +168,8 @@ onMounted(async () => {
         <TerminalView ref="terminalRef" @submit="onTerminalSubmit" />
       </section>
     </div>
+
+    <LevelHintDrawer v-model:open="hintOpen" />
   </div>
 </template>
 
@@ -186,6 +194,11 @@ onMounted(async () => {
   font-size: 16px;
   color: #2f80ed;
   margin-right: 8px;
+}
+.nav-link {
+  font-size: 13px;
+  color: #2f80ed;
+  margin-right: 12px;
 }
 .level-select {
   width: 260px;
