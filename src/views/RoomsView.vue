@@ -7,19 +7,22 @@
 import { ref, computed, onBeforeUnmount } from 'vue'
 import { Avatar, Button, Card, Input, Tag, Tooltip, message } from 'ant-design-vue'
 import { useRoomStore } from '@/stores/room'
+import { useAuthStore } from '@/stores/auth'
 import type { MemberView, PullRequestView } from '@/types/room'
 import GitGraphView from '@/components/graph/GitGraphView.vue'
 import TerminalView from '@/components/terminal/TerminalView.vue'
 import OperationPanel from '@/components/panel/OperationPanel.vue'
+import UserMenu from '@/components/auth/UserMenu.vue'
 
 const store = useRoomStore()
+const auth = useAuthStore()
 const terminalRef = ref<InstanceType<typeof TerminalView> | null>(null)
 
-// 建/加房表单
+// 建/加房表单（昵称默认取登录用户展示名，方便协作中辨认彼此——呼应 §6.3 化身标识）
 const createName = ref('')
-const createDisplay = ref('')
+const createDisplay = ref(auth.user?.displayName ?? '')
 const joinCode = ref('')
-const joinDisplay = ref('')
+const joinDisplay = ref(auth.user?.displayName ?? '')
 
 // 开 PR 表单
 const prTitle = ref('')
@@ -108,16 +111,23 @@ onBeforeUnmount(() => store.disconnect())
   <div class="rooms">
     <!-- 未入房：建 / 加房 -->
     <div v-if="!store.room" class="lobby">
-      <Card title="创建房间" class="lobby-card">
-        <Input v-model:value="createName" placeholder="房间名" class="lobby-input" />
-        <Input v-model:value="createDisplay" placeholder="你的昵称（可选）" class="lobby-input" />
-        <Button type="primary" :loading="store.busy" block @click="onCreate">创建并进入</Button>
-      </Card>
-      <Card title="加入房间" class="lobby-card">
-        <Input v-model:value="joinCode" placeholder="邀请码" class="lobby-input" />
-        <Input v-model:value="joinDisplay" placeholder="你的昵称（可选）" class="lobby-input" />
-        <Button :loading="store.busy" block @click="onJoin">加入</Button>
-      </Card>
+      <div class="lobby-top">
+        <RouterLink to="/" class="nav-link">← 工作台</RouterLink>
+        <div class="spacer" />
+        <UserMenu />
+      </div>
+      <div class="lobby-cards">
+        <Card title="创建房间" class="lobby-card">
+          <Input v-model:value="createName" placeholder="房间名" class="lobby-input" />
+          <Input v-model:value="createDisplay" placeholder="你的昵称（可选）" class="lobby-input" />
+          <Button type="primary" :loading="store.busy" block @click="onCreate">创建并进入</Button>
+        </Card>
+        <Card title="加入房间" class="lobby-card">
+          <Input v-model:value="joinCode" placeholder="邀请码" class="lobby-input" />
+          <Input v-model:value="joinDisplay" placeholder="你的昵称（可选）" class="lobby-input" />
+          <Button :loading="store.busy" block @click="onJoin">加入</Button>
+        </Card>
+      </div>
     </div>
 
     <!-- 入房后 -->
@@ -139,6 +149,7 @@ onBeforeUnmount(() => store.disconnect())
         </div>
         <div class="spacer" />
         <Button size="small" @click="store.leave()">离开房间</Button>
+        <UserMenu />
       </header>
 
       <div class="room-body">
@@ -189,7 +200,10 @@ onBeforeUnmount(() => store.disconnect())
 
 <style scoped>
 .rooms { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
-.lobby { display: flex; gap: 24px; justify-content: center; align-items: center; height: 100%; background: #f5f7fa; }
+.lobby { display: flex; flex-direction: column; height: 100%; background: #f5f7fa; }
+.lobby-top { display: flex; align-items: center; gap: 8px; height: 48px; padding: 0 16px; background: #fff; border-bottom: 1px solid #e8e8e8; }
+.lobby-top .nav-link { font-size: 13px; color: #2f80ed; }
+.lobby-cards { flex: 1; display: flex; gap: 24px; justify-content: center; align-items: center; }
 .lobby-card { width: 300px; }
 .lobby-input { margin-bottom: 10px; }
 .room { display: flex; flex-direction: column; height: 100%; }
