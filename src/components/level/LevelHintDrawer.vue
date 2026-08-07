@@ -30,7 +30,15 @@ const nextCost = computed(() => hints.value[store.revealedHints]?.costPoints ?? 
     @close="emit('update:open', false)"
   >
     <template v-if="store.levelDetail">
-      <div class="hint-section-title">目标</div>
+      <div class="hint-section-title">
+        目标
+        <span class="status-tag" :class="store.levelDetail.status">
+          {{ store.levelDetail.status === 'completed' ? '已通关' : store.levelDetail.status === 'in_progress' ? '进行中' : store.levelDetail.status === 'locked' ? '锁定' : '未开始' }}
+        </span>
+        <span v-if="store.levelDetail.attempts > 0" class="attempts">
+          尝试 {{ store.levelDetail.attempts }} 次
+        </span>
+      </div>
       <p class="level-desc">{{ store.levelDetail.description || '让「当前图」变成「目标图」。' }}</p>
 
       <div class="hint-section-title">
@@ -66,6 +74,28 @@ const nextCost = computed(() => hints.value[store.revealedHints]?.costPoints ?? 
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.status-tag {
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: #fff;
+}
+.status-tag.completed {
+  background: #27ae60;
+}
+.status-tag.in_progress {
+  background: #f2994a;
+}
+.status-tag.locked {
+  background: #9b51e0;
+}
+.status-tag.unlocked {
+  background: #2f80ed;
+}
+.attempts {
+  font-size: 12px;
+  color: #98a2b3;
 }
 .hint-section-title:first-child {
   margin-top: 0;

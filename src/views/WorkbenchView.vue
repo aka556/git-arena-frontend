@@ -5,16 +5,21 @@
  * <p>本页是命令的<b>唯一编排点</b>：终端回车与面板按钮都汇到统一执行链路（§3 黄金法则）。
  * 关卡模式下并排渲染"当前图 | 目标图"（§6.3 对照展示，两图共用同一确定性布局），校验走后端结构匹配。
  */
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted, watch } from 'vue'
 import { Button, Select, Modal, message } from 'ant-design-vue'
 import { useSessionStore } from '@/stores/session'
+import { useAuthStore } from '@/stores/auth'
+import { useProgressStore } from '@/stores/progress'
 import type { LevelSummary } from '@/types/level'
 import GitGraphView from '@/components/graph/GitGraphView.vue'
 import TerminalView from '@/components/terminal/TerminalView.vue'
 import OperationPanel from '@/components/panel/OperationPanel.vue'
 import LevelHintDrawer from '@/components/level/LevelHintDrawer.vue'
+import UserMenu from '@/components/auth/UserMenu.vue'
 
 const store = useSessionStore()
+const auth = useAuthStore()
+const progress = useProgressStore()
 const terminalRef = ref<InstanceType<typeof TerminalView> | null>(null)
 const starting = ref(false)
 const selectedSlug = ref<string | undefined>(undefined)
@@ -65,6 +70,8 @@ async function onValidate(): Promise<void> {
   try {
     const res = await store.validate()
     if (res.passed) {
+      // 后端已在校验时落库本次通关（登录用户）；这里重拉进度以更新"已通关"标注。
+      await progress.load()
       Modal.success({ title: '🎉 通关！', content: '仓库结构与目标一致。' })
     } else {
       Modal.warning({
@@ -114,8 +121,16 @@ onMounted(async () => {
   } catch (e) {
     message.warning('关卡列表加载失败：' + errMsg(e))
   }
+  await progress.load()
   await bootFreeSandbox()
 })
+
+// 登录/登出切换时刷新进度与关卡列表，确保状态字段同步到 UI。
+watch(() => auth.isAuthenticated, async () => {
+  await progress.load()
+  await store.loadLevels()
+})
+
 </script>
 
 <template>
@@ -131,7 +146,8 @@ onMounted(async () => {
         placeholder="选择关卡…"
         :options="store.levels.map((l: LevelSummary) => ({
           value: l.slug,
-          label: `[${l.category}] ${l.title} ${'★'.repeat(l.difficulty)}`,
+          label: `${l.status === 'completed' ? '✓ ' : ''}[${l.category}] ${l.title} ${'★'.repeat(l.difficulty)}${l.status === 'in_progress' ? ' · 进行中' : l.status === 'locked' ? ' · 锁定' : ''}`,
+          disabled: l.status === 'locked',
         }))"
       />
       <Button size="small" type="primary" :loading="starting" @click="onStartLevel">
@@ -143,9 +159,13 @@ onMounted(async () => {
       </Button>
 
       <div class="spacer"></div>
+      <span v-if="auth.isAuthenticated && progress.completedCount > 0" class="progress-badge">
+        已通关 {{ progress.completedCount }}/{{ store.levels.length }}
+      </span>
       <span v-if="store.activeLevel" class="level-badge">{{ store.activeLevel.title }}</span>
       <span class="session">会话：{{ store.sessionId ? store.sessionId.slice(0, 8) : '未连接' }}</span>
       <Button size="small" :loading="starting" @click="bootFreeSandbox">自由沙盒</Button>
+      <UserMenu />
     </header>
 
     <div class="body">
@@ -210,6 +230,13 @@ onMounted(async () => {
   font-size: 12px;
   color: #2f80ed;
   background: #e8f0fe;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.progress-badge {
+  font-size: 12px;
+  color: #27ae60;
+  background: #e9f7ef;
   padding: 2px 8px;
   border-radius: 4px;
 }
