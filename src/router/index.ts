@@ -1,12 +1,25 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import WorkbenchView from '@/views/WorkbenchView.vue'
+import { useAuthStore } from '@/stores/auth'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     { path: '/', name: 'workbench', component: WorkbenchView },
     { path: '/rooms', name: 'rooms', component: () => import('@/views/RoomsView.vue') },
+    { path: '/login', name: 'login', component: () => import('@/views/LoginView.vue'), meta: { guestOnly: true } },
   ],
+})
+
+// 认证是可选的（匿名沙盒/关卡照常可玩，CurrentUser 可选认证）：不硬拦工作台/房间。
+// 仅当已登录用户访问登录页时回跳，避免重复登录。
+router.beforeEach((to) => {
+  const auth = useAuthStore()
+  if (to.meta.guestOnly && auth.isAuthenticated) {
+    const redirect = to.query.redirect
+    return typeof redirect === 'string' && redirect.startsWith('/') ? redirect : '/'
+  }
+  return true
 })
 
 export default router

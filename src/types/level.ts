@@ -9,6 +9,8 @@ export interface LevelSummary {
   category: string
   difficulty: number
   mode: string
+  status: 'locked' | 'unlocked' | 'in_progress' | 'completed'
+  attempts: number
   orderIndex: number
 }
 
@@ -25,6 +27,8 @@ export interface LevelDetail {
   category: string
   difficulty: number
   mode: string
+  status: 'locked' | 'unlocked' | 'in_progress' | 'completed'
+  attempts: number
   initialGraph: GitGraph
   goalGraph: GitGraph
   hints: HintView[]
