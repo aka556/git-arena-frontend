@@ -19,6 +19,7 @@ import {
   openPullRequest,
   mergePullRequest,
 } from '@/api/room'
+import { useAuthStore } from './auth'
 
 export const useRoomStore = defineStore('room', () => {
   const room = ref<RoomView | null>(null)
@@ -106,6 +107,9 @@ export const useRoomStore = defineStore('room', () => {
     if (!room.value || !memberId.value) throw new Error('未加入房间')
     const res = await memberExec(room.value.roomId, memberId.value, command)
     myGraph.value = res.graph
+    if (res.ok && /^git\s+commit(?:\s|$)/.test(command.trim())) {
+      await useAuthStore().refresh().catch(() => undefined)
+    }
     return res
   }
 
@@ -123,6 +127,7 @@ export const useRoomStore = defineStore('room', () => {
     if (!room.value || !memberId.value) throw new Error('未加入房间')
     room.value = await mergePullRequest(room.value.roomId, number, memberId.value)
     await refreshOrigin()
+    await useAuthStore().refresh().catch(() => undefined)
   }
 
   function leave(): void {

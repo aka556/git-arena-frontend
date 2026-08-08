@@ -5,6 +5,7 @@
  * 房间状态经 STOMP 实时同步（他人 push / PR 变更即刷新）。
  */
 import { ref, computed, onBeforeUnmount } from 'vue'
+import { useRouter } from 'vue-router'
 import { Avatar, Button, Card, Input, Tag, Tooltip, message } from 'ant-design-vue'
 import { useRoomStore } from '@/stores/room'
 import { useAuthStore } from '@/stores/auth'
@@ -16,6 +17,7 @@ import UserMenu from '@/components/auth/UserMenu.vue'
 
 const store = useRoomStore()
 const auth = useAuthStore()
+const router = useRouter()
 const terminalRef = ref<InstanceType<typeof TerminalView> | null>(null)
 
 // 建/加房表单（昵称默认取登录用户展示名，方便协作中辨认彼此——呼应 §6.3 化身标识）
@@ -39,8 +41,17 @@ const memberName = (id: string | null): string =>
 const openPrs = computed(() => store.room?.pullRequests.filter((p: PullRequestView) => p.status === 'open') ?? [])
 const closedPrs = computed(() => store.room?.pullRequests.filter((p: PullRequestView) => p.status !== 'open') ?? [])
 
+/** 协作房间需登录（后端以登录用户鉴权，memberId 只是标识不是凭证）：未登录先引导登录。 */
+function requireLogin(): boolean {
+  if (auth.isAuthenticated) return true
+  message.info('参与协作房间需要先登录（游客也可一键体验）')
+  void router.push({ path: '/login', query: { redirect: '/rooms' } })
+  return false
+}
+
 async function onCreate(): Promise<void> {
   if (!createName.value.trim()) return message.warning('请输入房间名')
+  if (!requireLogin()) return
   try {
     await store.create(createName.value.trim(), createDisplay.value.trim() || '房主')
     bootTerminal()
@@ -51,6 +62,7 @@ async function onCreate(): Promise<void> {
 
 async function onJoin(): Promise<void> {
   if (!joinCode.value.trim()) return message.warning('请输入邀请码')
+  if (!requireLogin()) return
   try {
     await store.join(joinCode.value.trim(), joinDisplay.value.trim() || '玩家')
     bootTerminal()
