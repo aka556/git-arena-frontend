@@ -2,23 +2,56 @@
 /**
  * 关卡指引抽屉（antd 外壳区，§6.2）：关卡说明 + 分级提示。
  *
- * <p>提示<b>逐级揭示</b>（P2 提示系统的 M2 前端形态）：已看过的保持展开，下一条要主动点开——
- * 先自己想、卡住再看。揭示状态在 store（开始/重开关卡归零）。costPoints 仅作展示，
- * 扣分要等积分系统（P1 用户体系之后）上线。
+ * <p>提示逐级使用：后端写 user_hint_usage 并按 costPoints 扣分，同一提示只计一次。
  */
-import { computed } from 'vue'
-import { Button, Drawer, Empty, Tag } from 'ant-design-vue'
+import { computed, ref } from 'vue'
+import { Button, Drawer, Empty, Modal, Tag, message } from 'ant-design-vue'
 import { useSessionStore } from '@/stores/session'
+import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ 'update:open': [value: boolean] }>()
 
 const store = useSessionStore()
+const auth = useAuthStore()
+const revealing = ref(false)
 
 const hints = computed(() => store.levelDetail?.hints ?? [])
 const revealed = computed(() => hints.value.slice(0, store.revealedHints))
 const remaining = computed(() => hints.value.length - store.revealedHints)
 const nextCost = computed(() => hints.value[store.revealedHints]?.costPoints ?? 0)
+
+async function confirmCost(): Promise<boolean> {
+  if (nextCost.value <= 0) return true
+  return new Promise((resolve) => {
+    Modal.confirm({
+      title: '使用这条提示？',
+      content: `使用后将扣除 ${nextCost.value} 积分，同一条提示不会重复扣分。`,
+      okText: '使用提示',
+      cancelText: '再想想',
+      onOk: () => resolve(true),
+      onCancel: () => resolve(false),
+    })
+  })
+}
+
+async function onReveal(): Promise<void> {
+  if (!auth.isAuthenticated) {
+    message.warning('请先登录后使用提示')
+    return
+  }
+  if (!(await confirmCost())) return
+  const charged = nextCost.value
+  revealing.value = true
+  try {
+    await store.revealNextHint()
+    message.success(charged > 0 ? `已扣除 ${charged} 积分` : '提示已展示')
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : String(error))
+  } finally {
+    revealing.value = false
+  }
+}
 </script>
 
 <template>
@@ -54,9 +87,9 @@ const nextCost = computed(() => hints.value[store.revealedHints]?.costPoints ?? 
           <span class="hint-body">{{ hint.body }}</span>
         </div>
 
-        <Button v-if="remaining > 0" block class="hint-reveal" @click="store.revealNextHint()">
+        <Button v-if="remaining > 0" block class="hint-reveal" :loading="revealing" @click="onReveal">
           查看下一条提示
-          <span v-if="nextCost > 0" class="hint-cost">（将来消耗 {{ nextCost }} 积分）</span>
+          <span v-if="nextCost > 0" class="hint-cost">（扣 {{ nextCost }} 积分）</span>
         </Button>
         <p v-else class="hint-done">提示已全部展示。</p>
       </template>

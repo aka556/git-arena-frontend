@@ -43,6 +43,12 @@ export const useAuthStore = defineStore('auth', () => {
     ready.value = true
   }
 
+  async function refresh(): Promise<void> {
+    if (token.value) {
+      user.value = await authApi.fetchMe()
+    }
+  }
+
   async function login(usernameOrEmail: string, password: string): Promise<void> {
     apply(await authApi.login(usernameOrEmail, password))
   }
@@ -63,5 +69,14 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  return { token, user, ready, isAuthenticated, isGuest, init, login, register, guest, logout }
+  function setTotalPoints(totalPoints: number): void {
+    if (user.value) {
+      user.value = { ...user.value, totalPoints }
+    }
+  }
+
+  return {
+    token, user, ready, isAuthenticated, isGuest,
+    init, refresh, login, register, guest, logout, setTotalPoints,
+  }
 })

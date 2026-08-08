@@ -2,7 +2,13 @@
  * 关卡接口（对应后端 LevelController，一个后端资源一个文件——§6.1）。
  */
 import { request } from './http'
-import type { LevelDetail, LevelSummary, StartLevelResponse, ValidateResponse } from '@/types/level'
+import type {
+  HintUseResponse,
+  LevelDetail,
+  LevelSummary,
+  StartLevelResponse,
+  ValidateResponse,
+} from '@/types/level'
 
 export function listLevels(): Promise<LevelSummary[]> {
   return request<LevelSummary[]>({ url: '/levels', method: 'get' })
@@ -23,5 +29,13 @@ export function validateLevel(slug: string, sessionId: string): Promise<Validate
     url: `/levels/${slug}/validate`,
     method: 'post',
     data: { sessionId },
+  })
+}
+
+/** 使用一条提示：后端记录 usage、扣分并更新 hints_used。 */
+export function useHint(slug: string, hintId: number): Promise<HintUseResponse> {
+  return request<HintUseResponse>({
+    url: `/levels/${slug}/hints/${hintId}/use`,
+    method: 'post',
   })
 }

@@ -13,7 +13,8 @@ import type { CommandResponse, GitGraph } from '@/types/gitGraph'
 import type { LevelDetail, LevelSummary, ValidateResponse } from '@/types/level'
 import { createSession, resetSession } from '@/api/sandbox'
 import { runCommand } from '@/api/command'
-import { getLevel, listLevels, startLevel as apiStartLevel, validateLevel } from '@/api/level'
+import { getLevel, listLevels, startLevel as apiStartLevel, useHint, validateLevel } from '@/api/level'
+import { useAuthStore } from './auth'
 
 export const useSessionStore = defineStore('session', () => {
   const sessionId = ref<string | null>(null)
@@ -54,6 +55,9 @@ export const useSessionStore = defineStore('session', () => {
     try {
       const res = await runCommand(sessionId.value, command)
       graph.value = res.graph
+      if (res.ok && /^git\s+commit(?:\s|$)/.test(command.trim())) {
+        await useAuthStore().refresh().catch(() => undefined)
+      }
       return res
     } finally {
       busy.value = false
@@ -85,18 +89,34 @@ export const useSessionStore = defineStore('session', () => {
       goalGraph.value = res.goalGraph
       activeLevel.value = level
       levelDetail.value = detail
-      revealedHints.value = 0
+      revealedHints.value = detail.hints.filter((hint) => hint.used).length
     } finally {
       busy.value = false
     }
   }
 
-  /** 逐级揭示下一条提示。返回是否还有未揭示的。 */
-  function revealNextHint(): void {
+  /** 逐级使用下一条提示；已使用提示由详情回读，不重复扣分。 */
+  async function revealNextHint(): Promise<void> {
     const total = levelDetail.value?.hints.length ?? 0
-    if (revealedHints.value < total) {
-      revealedHints.value += 1
+    if (!levelDetail.value || !activeLevel.value || revealedHints.value >= total) {
+      return
     }
+    const hint = levelDetail.value.hints[revealedHints.value]
+    if (!hint) return
+    if (hint.used) {
+      revealedHints.value += 1
+      return
+    }
+    if (!useAuthStore().isAuthenticated) {
+      throw new Error('请先登录后使用提示')
+    }
+    if (hint.id == null) {
+      throw new Error('提示尚未同步到数据库，请稍后重试')
+    }
+    const result = await useHint(activeLevel.value.slug, hint.id)
+    hint.used = true
+    revealedHints.value += 1
+    useAuthStore().setTotalPoints(result.totalPoints)
   }
 
   /** 校验当前关卡是否达成。 */

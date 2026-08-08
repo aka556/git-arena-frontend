@@ -71,7 +71,7 @@ async function onValidate(): Promise<void> {
     const res = await store.validate()
     if (res.passed) {
       // 后端已在校验时落库本次通关（登录用户）；这里重拉进度以更新"已通关"标注。
-      await progress.load()
+      await Promise.all([progress.load(), auth.refresh().catch(() => undefined)])
       Modal.success({ title: '🎉 通关！', content: '仓库结构与目标一致。' })
     } else {
       Modal.warning({

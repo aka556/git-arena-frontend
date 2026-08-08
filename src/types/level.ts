@@ -15,9 +15,21 @@ export interface LevelSummary {
 }
 
 export interface HintView {
+  id: number | null
   tier: number
   body: string
   costPoints: number
+  used: boolean
+}
+
+export interface HintUseResponse {
+  hintId: number
+  tier: number
+  body: string
+  costPoints: number
+  pointsCharged: number
+  hintsUsed: number
+  totalPoints: number
 }
 
 export interface LevelDetail {
