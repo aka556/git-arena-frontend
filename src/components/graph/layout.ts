@@ -24,6 +24,8 @@ export interface LaidCommit {
 
 export interface LaidEdge {
   id: string
+  source: string
+  target: string
   x1: number
   y1: number
   x2: number
@@ -98,7 +100,15 @@ export function layoutGraph(graph: GitGraph): GraphLayout {
     for (const parentId of c.parents) {
       const to = positions.get(parentId)
       if (!to) continue
-      edges.push({ id: `${c.id}->${parentId}`, x1: from.x, y1: from.y, x2: to.x, y2: to.y })
+      edges.push({
+        id: `${c.id}->${parentId}`,
+        source: c.id,
+        target: parentId,
+        x1: from.x,
+        y1: from.y,
+        x2: to.x,
+        y2: to.y,
+      })
     }
   }
 
