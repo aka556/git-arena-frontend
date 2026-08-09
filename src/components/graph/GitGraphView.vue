@@ -9,6 +9,7 @@ import type { GitGraph } from '@/types/gitGraph'
 import {
   layoutGraph,
   NODE_RADIUS,
+  PADDING,
   type GraphLayout,
   type LaidCommit,
   type LaidEdge,
@@ -42,11 +43,14 @@ interface EdgeMotion {
   v2: Velocity
 }
 
-interface RefTag {
+interface RefEntry {
   key: string
   label: string
   isHead: boolean
   remote?: boolean
+}
+
+interface RefTag extends RefEntry {
   x: number
   y: number
 }
@@ -58,6 +62,13 @@ const BRANCH_FILL = '#e8f0fe'
 const REMOTE_FILL = '#fff1e6'
 const REMOTE_TEXT = '#b55320'
 
+/** 标签间距与「标签区 → 提交信息」间距；提交信息排在所有标签之后，避免相互遮挡。 */
+const REF_GAP = 6
+const MSG_GAP = 10
+/** 交互画布的留白：顶部保底空间要容得下「当前图」角标。 */
+const TOP_GUARD = 56
+const EDGE_PAD = 24
+
 const svgRef = ref<SVGSVGElement | null>(null)
 const visualPositions = new Map<string, Point>()
 const anchorPositions = new Map<string, Point>()
@@ -67,6 +78,7 @@ const edgeOffsets = new Map<string, number>()
 
 let graphState: GitGraph | null = null
 let layoutState: GraphLayout | null = null
+let refEntries = new Map<string, RefEntry[]>()
 let zoomBehavior: d3.ZoomBehavior<SVGSVGElement, unknown> | null = null
 let resizeObserver: ResizeObserver | null = null
 let frameId: number | null = null
@@ -74,55 +86,83 @@ let draggingNodeId: string | null = null
 let canvasWidth = 0
 let canvasHeight = 0
 let reduceMotion = false
+/** 通关庆祝：burst=弹珠散开落地，recover=spring 拉回原位；resolve 在图形完全复原后触发。 */
+let celebrationPhase: 'burst' | 'recover' | null = null
+let celebrationEndsAt = 0
+let celebrationResolve: (() => void) | null = null
 
-function buildRefTags(graph: GitGraph, positions: Map<string, Point>): RefTag[] {
-  const tags: RefTag[] = []
-  const stackByCommit = new Map<string, number>()
-  const place = (target: string): Point | null => {
-    const pos = positions.get(target)
-    if (!pos) return null
-    const stack = stackByCommit.get(target) ?? 0
-    stackByCommit.set(target, stack + 1)
-    return { x: pos.x + NODE_RADIUS + 14 + stack * 84, y: pos.y }
+/** 估算文本渲染宽度：CJK 全宽、拉丁半宽，宽度只用于排布不必像素级精确。 */
+function estimateTextWidth(text: string, latin: number, cjk: number): number {
+  let width = 0
+  for (const ch of text) width += (ch.codePointAt(0) ?? 0) > 0x2e7f ? cjk : latin
+  return width
+}
+
+function refPillWidth(label: string): number {
+  return Math.ceil(estimateTextWidth(label, 6.8, 11)) + 16
+}
+
+/** 提交信息的起始 x：排在该提交全部标签之后。 */
+function msgOffsetX(entries: RefEntry[] | undefined): number {
+  if (!entries || entries.length === 0) return NODE_RADIUS + 12
+  let refsWidth = 0
+  for (const entry of entries) refsWidth += refPillWidth(entry.label) + REF_GAP
+  return NODE_RADIUS + 12 + refsWidth - REF_GAP + MSG_GAP
+}
+
+/** 收集每个提交上的引用标签，固定优先级：HEAD 所在分支 → 本地分支 → tag → 远程 → 游离 HEAD。 */
+function collectRefEntries(graph: GitGraph): Map<string, RefEntry[]> {
+  const byCommit = new Map<string, RefEntry[]>()
+  const push = (target: string | null | undefined, entry: RefEntry): void => {
+    if (!target) return
+    const list = byCommit.get(target)
+    if (list) list.push(entry)
+    else byCommit.set(target, [entry])
   }
 
   for (const branch of graph.branches) {
-    if (!branch.target) continue
-    const at = place(branch.target)
-    if (!at) continue
     const isHead = graph.head.type === 'branch' && graph.head.ref === branch.name
-    tags.push({
+    push(branch.target, {
       key: `branch:${branch.name}`,
       label: isHead ? `HEAD → ${branch.name}` : branch.name,
       isHead,
-      x: at.x,
-      y: at.y,
     })
   }
   for (const tag of graph.tags) {
-    if (!tag.target) continue
-    const at = place(tag.target)
-    if (!at) continue
-    tags.push({ key: `tag:${tag.name}`, label: `tag: ${tag.name}`, isHead: false, x: at.x, y: at.y })
+    push(tag.target, { key: `tag:${tag.name}`, label: `tag: ${tag.name}`, isHead: false })
   }
   for (const remote of graph.remotes) {
     for (const branch of remote.branches) {
-      if (!branch.target) continue
-      const at = place(branch.target)
-      if (!at) continue
-      tags.push({
+      push(branch.target, {
         key: `remote:${remote.name}/${branch.name}`,
         label: `${remote.name}/${branch.name}`,
         isHead: false,
         remote: true,
-        x: at.x,
-        y: at.y,
       })
     }
   }
   if (graph.head.type === 'detached') {
-    const at = place(graph.head.ref)
-    if (at) tags.push({ key: 'head:detached', label: 'HEAD', isHead: true, x: at.x, y: at.y })
+    push(graph.head.ref, { key: 'head:detached', label: 'HEAD', isHead: true })
+  }
+
+  const rank = (entry: RefEntry): number =>
+    entry.isHead ? 0 : entry.remote ? 3 : entry.key.startsWith('tag:') ? 2 : 1
+  for (const list of byCommit.values()) {
+    list.sort((a, b) => rank(a) - rank(b) || a.label.localeCompare(b.label))
+  }
+  return byCommit
+}
+
+function buildRefTags(positions: Map<string, Point>): RefTag[] {
+  const tags: RefTag[] = []
+  for (const [target, entries] of refEntries) {
+    const pos = positions.get(target)
+    if (!pos) continue
+    let x = pos.x + NODE_RADIUS + 12
+    for (const entry of entries) {
+      tags.push({ ...entry, x, y: pos.y })
+      x += refPillWidth(entry.label) + REF_GAP
+    }
   }
   return tags
 }
@@ -314,6 +354,16 @@ function edgePath(edge: LaidEdge): string {
 function stepMotion(): boolean {
   const layout = layoutState
   if (!layout) return false
+
+  if (celebrationPhase === 'burst') {
+    if (performance.now() >= celebrationEndsAt) {
+      celebrationPhase = 'recover' // 弹跳结束，交还给 spring 拉回原位
+    } else {
+      stepCelebration(layout)
+      return true
+    }
+  }
+
   let moving = false
 
   for (const node of layout.nodes) {
@@ -335,6 +385,89 @@ function stepMotion(): boolean {
 
   return moving
 }
+
+/** 弹珠物理：重力下坠、落地反弹衰减、左右墙反弹；边控制点加速跟随避免橡皮筋失控。 */
+function stepCelebration(layout: GraphLayout): void {
+  const floor = canvasHeight - NODE_RADIUS - 10
+  const leftWall = NODE_RADIUS + 8
+  const rightWall = canvasWidth - NODE_RADIUS - 8
+
+  for (const node of layout.nodes) {
+    const point = visualPositions.get(node.id)
+    const velocity = nodeVelocities.get(node.id)
+    if (!point || !velocity) continue
+    velocity.y += 0.55
+    point.x += velocity.x
+    point.y += velocity.y
+    if (point.y > floor) {
+      point.y = floor
+      velocity.y *= -0.55
+      velocity.x *= 0.92
+    }
+    if (point.x < leftWall) {
+      point.x = leftWall
+      velocity.x *= -0.7
+    } else if (point.x > rightWall) {
+      point.x = rightWall
+      velocity.x *= -0.7
+    }
+  }
+
+  for (const edge of layout.edges) {
+    const motion = edgeMotions.get(edge.id)
+    if (!motion) continue
+    const target = desiredControls(edge)
+    springPoint(motion.c1, motion.v1, target.c1, 0.3, 0.6)
+    springPoint(motion.c2, motion.v2, target.c2, 0.3, 0.6)
+  }
+}
+
+/**
+ * 通关庆祝：节点像弹珠一样从图心弹开、落地弹跳，随后 spring 拉回原图形状。
+ * 返回的 Promise 在图形完全复原后 resolve（宿主据此弹恭喜消息）。
+ */
+function celebrate(): Promise<void> {
+  const layout = layoutState
+  if (!layout || layout.nodes.length === 0 || reduceMotion) {
+    return Promise.resolve()
+  }
+  celebrationResolve?.() // 重入保护：上一场未完直接了结
+  draggingNodeId = null
+  resetView()
+
+  let centerX = 0
+  let centerY = 0
+  for (const node of layout.nodes) {
+    const point = visualPositions.get(node.id)
+    centerX += point?.x ?? node.x
+    centerY += point?.y ?? node.y
+  }
+  centerX /= layout.nodes.length
+  centerY /= layout.nodes.length
+
+  for (const node of layout.nodes) {
+    const point = visualPositions.get(node.id)
+    const velocity = nodeVelocities.get(node.id)
+    if (!point || !velocity) continue
+    const dx = point.x - centerX
+    const dy = point.y - centerY
+    const length = Math.max(1, Math.hypot(dx, dy))
+    const burst = 7 + Math.random() * 5
+    velocity.x = (dx / length) * burst + (Math.random() - 0.5) * 4
+    velocity.y = (dy / length) * burst - (6 + Math.random() * 5) // 先向上抛再落地
+  }
+
+  celebrationPhase = 'burst'
+  celebrationEndsAt = performance.now() + 1900
+  // 只弹节点本身：标签与提交信息淡出，待图形复原后再淡回
+  if (svgRef.value) d3.select(svgRef.value).classed('celebrating', true)
+  return new Promise((resolve) => {
+    celebrationResolve = resolve
+    kickMotion()
+  })
+}
+
+defineExpose({ celebrate })
 
 function springPoint(
   point: Point,
@@ -384,6 +517,13 @@ function kickMotion(): void {
     frameId = null
     const moving = stepMotion()
     updateScene()
+    // 弹珠全部归位（图形复原）后才算庆祝完成，宿主此时再弹恭喜消息
+    if (!moving && celebrationPhase === 'recover') {
+      celebrationPhase = null
+      if (svgRef.value) d3.select(svgRef.value).classed('celebrating', false)
+      celebrationResolve?.()
+      celebrationResolve = null
+    }
     if (moving || draggingNodeId) frameId = requestAnimationFrame(tick)
   }
   frameId = requestAnimationFrame(tick)
@@ -407,11 +547,43 @@ function updateScene(): void {
       return `translate(${point.x},${point.y})`
     })
 
-  const refs = buildRefTags(graph, visualPositions)
+  const refs = buildRefTags(visualPositions)
   svg.select<SVGGElement>('g.layer-refs')
     .selectAll<SVGGElement, RefTag>('g.ref')
     .data(refs, (tag) => tag.key)
     .attr('transform', (tag) => `translate(${tag.x},${tag.y})`)
+}
+
+/** 内容实际宽度：最宽一行 = 节点 x + 标签区 + 提交信息（含左侧 PADDING 起点）。 */
+function measureContentWidth(layout: GraphLayout, fit: boolean): number {
+  let max = layout.width
+  for (const node of layout.nodes) {
+    const message = truncate(node.message, fit ? 22 : 30)
+    const end = node.x + msgOffsetX(refEntries.get(node.id)) + estimateTextWidth(message, 7.2, 12)
+    max = Math.max(max, end)
+  }
+  return Math.ceil(max)
+}
+
+/** 渲染层视口适配：整体平移布局坐标（布局层保持纯函数，§6.3）。 */
+function shiftLayout(layout: GraphLayout, dx: number, dy: number): GraphLayout {
+  if (dx === 0 && dy === 0) return layout
+  const positions = new Map<string, { x: number; y: number; lane: number }>()
+  for (const [id, pos] of layout.positions) {
+    positions.set(id, { x: pos.x + dx, y: pos.y + dy, lane: pos.lane })
+  }
+  return {
+    ...layout,
+    nodes: layout.nodes.map((node) => ({ ...node, x: node.x + dx, y: node.y + dy })),
+    edges: layout.edges.map((edge) => ({
+      ...edge,
+      x1: edge.x1 + dx,
+      y1: edge.y1 + dy,
+      x2: edge.x2 + dx,
+      y2: edge.y2 + dy,
+    })),
+    positions,
+  }
 }
 
 function render(): void {
@@ -420,9 +592,19 @@ function render(): void {
   const svg = d3.select(svgEl)
   const graph = props.graph
 
+  // 新快照到来时中断弹跳，让节点直接 spring 去新布局（庆祝让位于真实状态）
+  if (celebrationPhase === 'burst') {
+    celebrationPhase = 'recover'
+  }
+
   if (!graph || graph.commits.length === 0) {
     graphState = null
     layoutState = null
+    refEntries = new Map()
+    celebrationPhase = null
+    svg.classed('celebrating', false)
+    celebrationResolve?.()
+    celebrationResolve = null
     visualPositions.clear()
     anchorPositions.clear()
     nodeVelocities.clear()
@@ -432,16 +614,23 @@ function render(): void {
     return
   }
 
-  const layout = layoutGraph(graph)
+  refEntries = collectRefEntries(graph)
+  let layout = layoutGraph(graph)
   const host = svgEl.parentElement
-  const contentWidth = Math.max(layout.width + 220, 360)
-  const contentHeight = Math.max(layout.height, props.fit ? 260 : 0)
-  canvasWidth = props.interactive
-    ? Math.max(contentWidth, host?.clientWidth ?? 0, 640)
-    : contentWidth
-  canvasHeight = props.interactive
-    ? Math.max(contentHeight, host?.clientHeight ?? 0, 420)
-    : Math.max(contentHeight, 260)
+  const contentWidth = measureContentWidth(layout, props.fit) + EDGE_PAD
+  const contentHeight = layout.height
+
+  if (props.interactive) {
+    canvasWidth = Math.max(contentWidth + EDGE_PAD, host?.clientWidth ?? 0, 640)
+    canvasHeight = Math.max(contentHeight + TOP_GUARD + EDGE_PAD, host?.clientHeight ?? 0, 420)
+    // 内容小于画布时整体居中；大图保底留白（顶部让出「当前图」角标）
+    const offsetX = Math.max(EDGE_PAD, (canvasWidth - contentWidth) / 2)
+    const offsetY = Math.max(TOP_GUARD, (canvasHeight - contentHeight) / 2)
+    layout = shiftLayout(layout, offsetX - PADDING, offsetY - PADDING)
+  } else {
+    canvasWidth = Math.max(contentWidth, 360)
+    canvasHeight = Math.max(contentHeight, 260)
+  }
 
   if (props.fit) {
     svg
@@ -533,10 +722,12 @@ function render(): void {
     .attr('aria-label', (commit) => `${commit.seq} ${commit.message}`)
 
   node.select<SVGTextElement>('text.seq').text((commit) => commit.seq)
-  node.select<SVGTextElement>('text.msg').text((commit) => truncate(commit.message, props.fit ? 22 : 30))
+  node.select<SVGTextElement>('text.msg')
+    .attr('x', (commit) => msgOffsetX(refEntries.get(commit.id)))
+    .text((commit) => truncate(commit.message, props.fit ? 22 : 30))
   setupNodeDrag(node)
 
-  const refTags = buildRefTags(graph, visualPositions)
+  const refTags = buildRefTags(visualPositions)
   const refSelection = refs
     .selectAll<SVGGElement, RefTag>('g.ref')
     .data(refTags, (tag) => tag.key)
@@ -552,7 +743,7 @@ function render(): void {
     )
 
   refSelection.select<SVGRectElement>('rect')
-    .attr('width', (tag) => tag.label.length * 7 + 16)
+    .attr('width', (tag) => refPillWidth(tag.label))
     .attr('fill', (tag) => (tag.isHead ? HEAD_ACCENT : tag.remote ? REMOTE_FILL : BRANCH_FILL))
   refSelection.select<SVGTextElement>('text')
     .attr('fill', (tag) => (tag.isHead ? '#ffffff' : tag.remote ? REMOTE_TEXT : '#2f6fc0'))
@@ -681,6 +872,17 @@ watch(() => props.graph, render, { deep: true })
 .graph-svg :deep(.seq),
 .graph-svg :deep(.ref) {
   pointer-events: none;
+}
+
+/* 通关庆祝只弹节点本体：标签与提交信息淡出，节点归位后淡回 */
+.graph-svg :deep(.msg),
+.graph-svg :deep(.layer-refs) {
+  transition: opacity 200ms ease;
+}
+
+.graph-svg.celebrating :deep(.msg),
+.graph-svg.celebrating :deep(.layer-refs) {
+  opacity: 0;
 }
 
 .graph-empty {
