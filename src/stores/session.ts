@@ -127,10 +127,29 @@ export const useSessionStore = defineStore('session', () => {
     return validateLevel(activeLevel.value.slug, sessionId.value)
   }
 
+
+  /**
+   * Mark the active level as completed immediately after validate succeeds.
+   * This is only frontend display state; the backend remains the persisted source of truth.
+   */
+  function markActiveLevelCompleted(): void {
+    const current = activeLevel.value
+    if (!current) return
+    const slug = current.slug
+
+    activeLevel.value = { ...current, status: 'completed' }
+    if (levelDetail.value?.slug === slug) {
+      levelDetail.value = { ...levelDetail.value, status: 'completed' }
+    }
+    levels.value = levels.value.map((level) => (
+      level.slug === slug ? { ...level, status: 'completed' } : level
+    ))
+  }
+
   return {
     sessionId, graph, busy,
     levels, activeLevel, goalGraph, levelDetail, revealedHints,
     initSession, exec, reset,
-    loadLevels, startLevel, validate, revealNextHint,
+    loadLevels, startLevel, validate, revealNextHint, markActiveLevelCompleted,
   }
 })

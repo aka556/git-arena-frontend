@@ -3,27 +3,34 @@
  * 工作台页面（CLAUDE.md §6.1 views）。图视图与终端视图并存，共用 store 里同一份 GitGraph 快照。
  *
  * <p>本页是命令的<b>唯一编排点</b>：终端回车与面板按钮都汇到统一执行链路（§3 黄金法则）。
- * 关卡模式下并排渲染"当前图 | 目标图"（§6.3 对照展示，两图共用同一确定性布局），校验走后端结构匹配。
+ * 关卡模式下当前图占满画布，目标图以可移动浮窗叠加展示；两图仍共用同一确定性布局，校验走后端结构匹配。
  */
-import { computed, ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { Button, Select, Modal, message } from 'ant-design-vue'
 import { useSessionStore } from '@/stores/session'
 import { useAuthStore } from '@/stores/auth'
 import { useProgressStore } from '@/stores/progress'
+import { useEngagementStore } from '@/stores/engagement'
 import type { LevelSummary } from '@/types/level'
 import GitGraphView from '@/components/graph/GitGraphView.vue'
 import TerminalView from '@/components/terminal/TerminalView.vue'
 import OperationPanel from '@/components/panel/OperationPanel.vue'
 import LevelHintDrawer from '@/components/level/LevelHintDrawer.vue'
+import GoalGraphCard from '@/components/level/GoalGraphCard.vue'
+import EngagementDrawer from '@/components/engagement/EngagementDrawer.vue'
 import UserMenu from '@/components/auth/UserMenu.vue'
+import gitArenaLogo from '@/assets/git-arena.png'
 
 const store = useSessionStore()
 const auth = useAuthStore()
 const progress = useProgressStore()
+const engagement = useEngagementStore()
 const terminalRef = ref<InstanceType<typeof TerminalView> | null>(null)
 const starting = ref(false)
 const selectedSlug = ref<string | undefined>(undefined)
 const hintOpen = ref(false)
+const engagementOpen = ref(false)
+const goalOpen = ref(true)
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
@@ -57,7 +64,7 @@ async function onStartLevel(): Promise<void> {
     await store.startLevel(level)
     terminalRef.value?.boot([
       `关卡：${level.title}（难度 ${'★'.repeat(level.difficulty)}）`,
-      '让"当前图"变成右侧"目标图"，然后点「校验」。',
+      '让当前仓库达到目标图的状态，然后点「校验」。',
     ])
   } catch (e) {
     message.error(errMsg(e))
@@ -71,7 +78,8 @@ async function onValidate(): Promise<void> {
     const res = await store.validate()
     if (res.passed) {
       // 后端已在校验时落库本次通关（登录用户）；这里重拉进度以更新"已通关"标注。
-      await Promise.all([progress.load(), auth.refresh().catch(() => undefined)])
+      store.markActiveLevelCompleted()
+      await Promise.all([progress.load(), store.loadLevels(), auth.refresh().catch(() => undefined)])
       Modal.success({ title: '🎉 通关！', content: '仓库结构与目标一致。' })
     } else {
       Modal.warning({
@@ -126,9 +134,16 @@ onMounted(async () => {
 })
 
 // 登录/登出切换时刷新进度与关卡列表，确保状态字段同步到 UI。
-watch(() => auth.isAuthenticated, async () => {
+watch(() => auth.isAuthenticated, async (isAuthenticated) => {
+  if (!isAuthenticated) {
+    engagement.clearPersonal()
+  }
   await progress.load()
   await store.loadLevels()
+})
+
+watch(() => store.activeLevel?.slug, (slug, previousSlug) => {
+  if (slug && slug !== previousSlug) goalOpen.value = true
 })
 
 </script>
@@ -136,7 +151,10 @@ watch(() => auth.isAuthenticated, async () => {
 <template>
   <div class="workbench">
     <header class="toolbar">
-      <div class="brand">git-arena</div>
+      <div class="brand">
+        <img :src="gitArenaLogo" alt="" class="brand-logo" />
+        <span>git-arena</span>
+      </div>
       <RouterLink to="/rooms" class="nav-link">协作房间 →</RouterLink>
 
       <Select
@@ -164,6 +182,9 @@ watch(() => auth.isAuthenticated, async () => {
       </span>
       <span v-if="store.activeLevel" class="level-badge">{{ store.activeLevel.title }}</span>
       <span class="session">会话：{{ store.sessionId ? store.sessionId.slice(0, 8) : '未连接' }}</span>
+      <Button size="small" @click="engagementOpen = true">
+        成长{{ auth.isAuthenticated ? ` · ${auth.user?.totalPoints ?? 0}` : '' }}
+      </Button>
       <Button size="small" :loading="starting" @click="bootFreeSandbox">自由沙盒</Button>
       <UserMenu />
     </header>
@@ -173,15 +194,23 @@ watch(() => auth.isAuthenticated, async () => {
         <OperationPanel :disabled="!store.sessionId || store.busy" @run="onPanelRun" @reset="onReset" />
       </aside>
 
-      <main class="graph-col" :class="{ split: store.activeLevel }">
+      <main class="graph-col">
         <section class="graph-pane">
-          <div v-if="store.activeLevel" class="pane-title">当前图</div>
-          <GitGraphView :graph="store.graph" />
+          <div v-if="store.activeLevel" class="current-label">
+            <span class="current-label-mark"></span>
+            当前图
+          </div>
+          <GitGraphView :graph="store.graph" :interactive="true" />
         </section>
-        <section v-if="store.activeLevel" class="graph-pane goal-pane">
-          <div class="pane-title">目标图</div>
-          <GitGraphView :graph="store.goalGraph" />
-        </section>
+
+        <GoalGraphCard
+          v-if="store.activeLevel"
+          :key="store.activeLevel.slug"
+          v-model:open="goalOpen"
+          :graph="store.goalGraph"
+          :level-title="store.activeLevel.title"
+          :completed="store.activeLevel.status === 'completed'"
+        />
       </main>
 
       <section class="terminal-col">
@@ -190,6 +219,7 @@ watch(() => auth.isAuthenticated, async () => {
     </div>
 
     <LevelHintDrawer v-model:open="hintOpen" />
+    <EngagementDrawer v-model:open="engagementOpen" />
   </div>
 </template>
 
@@ -210,10 +240,21 @@ watch(() => auth.isAuthenticated, async () => {
   border-bottom: 1px solid #e8e8e8;
 }
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
   font-weight: 700;
   font-size: 16px;
   color: #2f80ed;
   margin-right: 8px;
+}
+.brand-logo {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  flex: 0 0 28px;
+  display: block;
 }
 .nav-link {
   font-size: 13px;
@@ -257,29 +298,39 @@ watch(() => auth.isAuthenticated, async () => {
   background: #fff;
 }
 .graph-col {
+  position: relative;
   flex: 1;
   min-width: 0;
   display: flex;
   overflow: hidden;
 }
 .graph-pane {
+  position: relative;
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
-.goal-pane {
-  border-left: 1px dashed #cbd5e1;
-  background: #f8fafc;
-}
-.pane-title {
+.current-label {
+  position: absolute;
+  z-index: 4;
+  top: 14px;
+  left: 16px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
   font-size: 12px;
   font-weight: 600;
-  color: #667085;
-  padding: 6px 10px;
-  border-bottom: 1px solid #eef1f5;
-  background: #fff;
+  color: #4c5d70;
+  pointer-events: none;
+}
+.current-label-mark {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #2f80ed;
+  box-shadow: 0 0 0 3px rgba(47, 128, 237, 0.13);
 }
 .graph-pane :deep(.graph-view) {
   flex: 1;
