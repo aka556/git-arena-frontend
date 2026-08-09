@@ -26,11 +26,14 @@ const auth = useAuthStore()
 const progress = useProgressStore()
 const engagement = useEngagementStore()
 const terminalRef = ref<InstanceType<typeof TerminalView> | null>(null)
+const graphRef = ref<InstanceType<typeof GitGraphView> | null>(null)
 const starting = ref(false)
 const selectedSlug = ref<string | undefined>(undefined)
 const hintOpen = ref(false)
 const engagementOpen = ref(false)
 const goalOpen = ref(true)
+/** 本次开关卡后是否已通关：通关后停掉自动校验与重复庆祝，重开/换关时复位。 */
+const sessionPassed = ref(false)
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
@@ -62,9 +65,10 @@ async function onStartLevel(): Promise<void> {
   starting.value = true
   try {
     await store.startLevel(level)
+    sessionPassed.value = false
     terminalRef.value?.boot([
       `关卡：${level.title}（难度 ${'★'.repeat(level.difficulty)}）`,
-      '让当前仓库达到目标图的状态，然后点「校验」。',
+      '让当前仓库达到目标图的状态，达成后会自动判定通关。',
     ])
   } catch (e) {
     message.error(errMsg(e))
@@ -73,22 +77,28 @@ async function onStartLevel(): Promise<void> {
   }
 }
 
-async function onValidate(): Promise<void> {
+/** 通关流程：刷新进度 → 弹珠庆祝动画（图形复原后）→ 恭喜消息。 */
+async function celebratePass(): Promise<void> {
+  sessionPassed.value = true
+  const title = store.activeLevel?.title ?? ''
+  store.markActiveLevelCompleted()
+  await Promise.all([progress.load(), store.loadLevels(), auth.refresh().catch(() => undefined)])
+  await (graphRef.value?.celebrate() ?? Promise.resolve())
+  Modal.success({
+    title: '🎉 恭喜通关！',
+    content: title ? `已完成「${title}」，仓库结构与目标一致。` : '仓库结构与目标一致。',
+  })
+}
+
+/** 自动校验（oh-my-git / Learning Git Branching 风格）：git 命令成功后静默判定，通过即庆祝。 */
+async function autoValidate(cmd: string): Promise<void> {
+  if (!store.activeLevel || sessionPassed.value) return
+  if (!cmd.trim().startsWith('git ')) return // shell 命令不改变提交结构，跳过
   try {
     const res = await store.validate()
-    if (res.passed) {
-      // 后端已在校验时落库本次通关（登录用户）；这里重拉进度以更新"已通关"标注。
-      store.markActiveLevelCompleted()
-      await Promise.all([progress.load(), store.loadLevels(), auth.refresh().catch(() => undefined)])
-      Modal.success({ title: '🎉 通关！', content: '仓库结构与目标一致。' })
-    } else {
-      Modal.warning({
-        title: '还没达成目标',
-        content: () => res.reasons.map((r) => '· ' + r).join('\n'),
-      })
-    }
-  } catch (e) {
-    message.error(errMsg(e))
+    if (res.passed) await celebratePass()
+  } catch {
+    // 偶发失败静默不打断练习；下一条 git 命令会再次触发判定
   }
 }
 
@@ -97,6 +107,7 @@ async function onTerminalSubmit(cmd: string): Promise<void> {
   try {
     const res = await store.exec(cmd)
     terminalRef.value?.writeResult(res)
+    if (res.ok) await autoValidate(cmd)
   } catch (e) {
     terminalRef.value?.writeError(errMsg(e))
   }
@@ -108,6 +119,7 @@ async function onPanelRun(cmd: string): Promise<void> {
   try {
     const res = await store.exec(cmd)
     terminalRef.value?.writeResult(res)
+    if (res.ok) await autoValidate(cmd)
   } catch (e) {
     terminalRef.value?.writeError(errMsg(e))
   }
@@ -116,6 +128,7 @@ async function onPanelRun(cmd: string): Promise<void> {
 async function onReset(): Promise<void> {
   try {
     await store.reset()
+    sessionPassed.value = false // 重开/重置后允许再次自动判定
     terminalRef.value?.boot([store.activeLevel ? '--- 关卡已重开 ---' : '--- 沙盒已重置 ---'])
     message.success(store.activeLevel ? '已重开本关' : '已重置到空仓库')
   } catch (e) {
@@ -171,7 +184,6 @@ watch(() => store.activeLevel?.slug, (slug, previousSlug) => {
       <Button size="small" type="primary" :loading="starting" @click="onStartLevel">
         {{ store.activeLevel && store.activeLevel.slug === selectedSlug ? '重开关卡' : '开始关卡' }}
       </Button>
-      <Button v-if="store.activeLevel" size="small" @click="onValidate">校验</Button>
       <Button v-if="store.activeLevel" size="small" @click="hintOpen = true">
         提示{{ store.revealedHints > 0 ? ` ${store.revealedHints}/${store.levelDetail?.hints.length ?? 0}` : '' }}
       </Button>
@@ -194,28 +206,31 @@ watch(() => store.activeLevel?.slug, (slug, previousSlug) => {
         <OperationPanel :disabled="!store.sessionId || store.busy" @run="onPanelRun" @reset="onReset" />
       </aside>
 
-      <main class="graph-col">
-        <section class="graph-pane">
-          <div v-if="store.activeLevel" class="current-label">
-            <span class="current-label-mark"></span>
-            当前图
-          </div>
-          <GitGraphView :graph="store.graph" :interactive="true" />
+      <!-- stage 承载浮动目标卡的活动范围：图形区 + 终端区都可拖放 -->
+      <div class="stage">
+        <main class="graph-col">
+          <section class="graph-pane">
+            <div v-if="store.activeLevel" class="current-label">
+              <span class="current-label-mark"></span>
+              当前图
+            </div>
+            <GitGraphView ref="graphRef" :graph="store.graph" :interactive="true" />
+          </section>
+        </main>
+
+        <section class="terminal-col">
+          <TerminalView ref="terminalRef" @submit="onTerminalSubmit" />
         </section>
 
         <GoalGraphCard
           v-if="store.activeLevel"
-          :key="store.activeLevel.slug"
+          :key="`${store.sessionId ?? ''}:${store.activeLevel.slug}`"
           v-model:open="goalOpen"
           :graph="store.goalGraph"
           :level-title="store.activeLevel.title"
           :completed="store.activeLevel.status === 'completed'"
         />
-      </main>
-
-      <section class="terminal-col">
-        <TerminalView ref="terminalRef" @submit="onTerminalSubmit" />
-      </section>
+      </div>
     </div>
 
     <LevelHintDrawer v-model:open="hintOpen" />
@@ -297,6 +312,15 @@ watch(() => store.activeLevel?.slug, (slug, previousSlug) => {
   overflow: auto;
   background: #fff;
 }
+.stage {
+  /* 目标卡浮层的坐标系与拖拽范围（图形区 + 终端区）；
+     --goal-home-offset 与 .terminal-col 宽度保持同源，供卡片默认锚点避开终端。 */
+  --goal-home-offset: max(40%, 360px);
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
 .graph-col {
   position: relative;
   flex: 1;
@@ -336,8 +360,7 @@ watch(() => store.activeLevel?.slug, (slug, previousSlug) => {
   flex: 1;
 }
 .terminal-col {
-  width: 40%;
-  min-width: 360px;
+  width: var(--goal-home-offset);
   border-left: 1px solid #e8e8e8;
 }
 </style>
