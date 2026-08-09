@@ -21,12 +21,17 @@ let resizeObserver: ResizeObserver | null = null
 let current = ''
 const history: string[] = []
 let historyIdx = -1
+let currentCwd = '~'
 let accepting = true // 命令执行期间暂停接收输入
 
-const PROMPT = '\x1b[36marena$\x1b[0m '
+const CLEAR_SEQUENCE = '\x1b[2J\x1b[H'
+
+function prompt(): string {
+  return `\x1b[36marena:${currentCwd || '~'}$\x1b[0m `
+}
 
 function writePrompt(): void {
-  term?.write(PROMPT)
+  term?.write(prompt())
 }
 
 function clearLine(): void {
@@ -103,10 +108,34 @@ function onData(data: string): void {
 }
 
 /** 写回命令结果并给出新提示符（由上层在 store.exec 完成后调用）。 */
+function normalizeOutput(text: string): string {
+  return text.replace(/\r?\n/g, '\r\n')
+}
+
+function writeOutput(text: string): void {
+  if (!term || !text) return
+  const normalized = normalizeOutput(text)
+  term.write(normalized)
+  if (!normalized.endsWith('\r\n')) term.write('\r\n')
+}
+
+function writeStderr(text: string): void {
+  if (!term || !text) return
+  const normalized = normalizeOutput(text)
+  term.write('\x1b[31m' + normalized + '\x1b[0m')
+  if (!normalized.endsWith('\r\n')) term.write('\r\n')
+}
+
 function writeResult(res: CommandResponse): void {
   if (!term) return
-  if (res.stdout) term.write(res.stdout.replace(/\n/g, '\r\n') + '\r\n')
-  if (res.stderr) term.write('\x1b[31m' + res.stderr.replace(/\n/g, '\r\n') + '\x1b[0m\r\n')
+  currentCwd = res.cwd || currentCwd
+  if (res.stdout === CLEAR_SEQUENCE) {
+    term.clear()
+    term.write(CLEAR_SEQUENCE)
+  } else {
+    writeOutput(res.stdout)
+  }
+  writeStderr(res.stderr)
   accepting = true
   writePrompt()
 }
@@ -114,7 +143,7 @@ function writeResult(res: CommandResponse): void {
 /** 写回错误（网络/异常）并恢复输入。 */
 function writeError(message: string): void {
   if (!term) return
-  term.write('\x1b[31m' + message.replace(/\n/g, '\r\n') + '\x1b[0m\r\n')
+  writeStderr(message)
   accepting = true
   writePrompt()
 }
@@ -133,6 +162,7 @@ function boot(lines: string[]): void {
   lines.forEach((l) => writeSystem(l))
   accepting = true
   current = ''
+  currentCwd = '~'
   writePrompt()
 }
 

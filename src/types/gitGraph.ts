@@ -65,6 +65,7 @@ export interface CommandResponse {
   stdout: string
   stderr: string
   graph: GitGraph
+  cwd: string
 }
 
 /** 会话创建/重置响应（后端 SessionResponse）。 */
