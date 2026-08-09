@@ -13,6 +13,7 @@ import type { MemberView, PullRequestView } from '@/types/room'
 import GitGraphView from '@/components/graph/GitGraphView.vue'
 import TerminalView from '@/components/terminal/TerminalView.vue'
 import OperationPanel from '@/components/panel/OperationPanel.vue'
+import PrReviewDrawer from '@/components/collab/PrReviewDrawer.vue'
 import UserMenu from '@/components/auth/UserMenu.vue'
 
 const store = useRoomStore()
@@ -116,6 +117,15 @@ async function onMergePr(number: number): Promise<void> {
   }
 }
 
+/** 打开评审面板（差异 + 评审串由 store 拉取）。 */
+async function onReview(number: number): Promise<void> {
+  try {
+    await store.loadReview(number)
+  } catch (e) {
+    message.error(errMsg(e))
+  }
+}
+
 onBeforeUnmount(() => store.disconnect())
 </script>
 
@@ -182,10 +192,29 @@ onBeforeUnmount(() => store.disconnect())
                 <Tag :color="pr.mergeable === 'conflict' ? 'red' : 'green'" class="pr-tag">{{ pr.mergeable }}</Tag>
               </div>
               <div class="pr-sub">{{ pr.sourceBranch }} → {{ pr.targetBranch }} · {{ memberName(pr.authorMemberId) }}</div>
-              <Button v-if="store.isOwner()" size="small" type="primary" @click="onMergePr(pr.number)">合并</Button>
+              <div class="pr-badges">
+                <Tag v-if="pr.changesRequested" color="red">请求修改</Tag>
+                <Tag v-else-if="pr.approvals > 0" color="green">已批准 {{ pr.approvals }}</Tag>
+                <Tag v-if="pr.commentCount > 0">评论 {{ pr.commentCount }}</Tag>
+              </div>
+              <div class="pr-actions">
+                <Button size="small" @click="onReview(pr.number)">评审</Button>
+                <Tooltip v-if="store.isOwner() && pr.changesRequested" title="有评审者请求修改，需其重新评审通过后才能合并">
+                  <Button size="small" type="primary" disabled>合并</Button>
+                </Tooltip>
+                <Button
+                  v-else-if="store.isOwner()"
+                  size="small"
+                  type="primary"
+                  @click="onMergePr(pr.number)"
+                >
+                  合并
+                </Button>
+              </div>
             </div>
             <div v-for="pr in closedPrs" :key="pr.number" class="pr-item closed">
               <div class="pr-line"><b>#{{ pr.number }}</b> {{ pr.title }} <Tag color="purple">{{ pr.status }}</Tag></div>
+              <Button size="small" type="link" @click="onReview(pr.number)">查看评审</Button>
             </div>
             <p v-if="store.room.pullRequests.length === 0" class="pr-empty">还没有 PR</p>
           </Card>
@@ -206,6 +235,8 @@ onBeforeUnmount(() => store.disconnect())
           <TerminalView ref="terminalRef" @submit="(c: string) => onExec(c, false)" />
         </section>
       </div>
+
+      <PrReviewDrawer />
     </div>
   </div>
 </template>
@@ -234,6 +265,8 @@ onBeforeUnmount(() => store.disconnect())
 .pr-line { font-size: 13px; }
 .pr-tag { margin-left: 4px; }
 .pr-sub { font-size: 11px; color: #98a2b3; margin: 2px 0 4px; }
+.pr-badges { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.pr-actions { display: flex; gap: 6px; }
 .pr-empty { font-size: 12px; color: #98a2b3; }
 .room-graphs { flex: 1; display: flex; min-width: 0; }
 .pane { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }

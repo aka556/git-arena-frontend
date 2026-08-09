@@ -10,14 +10,19 @@ import { ref } from 'vue'
 import { Client, type IMessage } from '@stomp/stompjs'
 import SockJS from 'sockjs-client'
 import type { CommandResponse, GitGraph } from '@/types/gitGraph'
+import type { DiffSide, InlineCommentInput, PrDiff, ReviewState, ReviewThread } from '@/types/prReview'
 import type { RoomView } from '@/types/room'
 import {
   createRoom as apiCreateRoom,
   joinRoom as apiJoinRoom,
+  addPrComment,
   fetchOriginGraph,
+  fetchPrDiff,
+  fetchPrThread,
   memberExec,
   openPullRequest,
   mergePullRequest,
+  submitPrReview,
 } from '@/api/room'
 import { useAuthStore } from './auth'
 
@@ -29,6 +34,12 @@ export const useRoomStore = defineStore('room', () => {
   const originGraph = ref<GitGraph | null>(null)
   const busy = ref(false)
   const connected = ref(false)
+
+  /** 正在评审的 PR 编号；null = 未打开评审面板。 */
+  const reviewingPr = ref<number | null>(null)
+  const prDiff = ref<PrDiff | null>(null)
+  const prThread = ref<ReviewThread | null>(null)
+  const reviewLoading = ref(false)
 
   let stomp: Client | null = null
 
@@ -51,8 +62,12 @@ export const useRoomStore = defineStore('room', () => {
         connected.value = true
         stomp?.subscribe(`/topic/rooms/${roomId}`, (msg: IMessage) => {
           room.value = JSON.parse(msg.body) as RoomView
-          // 房间有变（他人 push / PR）→ 刷新共享图
+          // 房间有变（他人 push / PR / 评审）→ 刷新共享图
           void refreshOrigin()
+          // push 会让后端重算行级评论锚点（§4.5），面板开着就得重拉，否则显示的是过期行号
+          if (reviewingPr.value != null) {
+            void loadReview(reviewingPr.value).catch(() => undefined)
+          }
         })
       },
       onDisconnect: () => (connected.value = false),
@@ -128,6 +143,55 @@ export const useRoomStore = defineStore('room', () => {
     room.value = await mergePullRequest(room.value.roomId, number, memberId.value)
     await refreshOrigin()
     await useAuthStore().refresh().catch(() => undefined)
+    if (reviewingPr.value === number) {
+      await loadReview(number)
+    }
+  }
+
+  /** 打开某个 PR 的评审面板：差异与评审串一并拉取。 */
+  async function loadReview(number: number): Promise<void> {
+    if (!room.value) throw new Error('未加入房间')
+    reviewingPr.value = number
+    reviewLoading.value = true
+    try {
+      const [diff, thread] = await Promise.all([
+        fetchPrDiff(room.value.roomId, number),
+        fetchPrThread(room.value.roomId, number),
+      ])
+      prDiff.value = diff
+      prThread.value = thread
+    } finally {
+      reviewLoading.value = false
+    }
+  }
+
+  function closeReview(): void {
+    reviewingPr.value = null
+    prDiff.value = null
+    prThread.value = null
+  }
+
+  /**
+   * 提交评审。附带的行级评论只报「哪一侧的哪一行」，
+   * 锚点事实（sha / hunk）由后端按当时真实 diff 定格，前端不自报（§4.5）。
+   */
+  async function submitReview(payload: {
+    state: ReviewState
+    body?: string
+    comments?: InlineCommentInput[]
+  }): Promise<void> {
+    if (!room.value || reviewingPr.value == null) throw new Error('没有正在评审的 PR')
+    prThread.value = await submitPrReview(room.value.roomId, reviewingPr.value, payload)
+  }
+
+  async function comment(payload: {
+    body: string
+    filePath?: string
+    diffSide?: DiffSide
+    line?: number
+  }): Promise<void> {
+    if (!room.value || reviewingPr.value == null) throw new Error('没有正在评审的 PR')
+    prThread.value = await addPrComment(room.value.roomId, reviewingPr.value, payload)
   }
 
   function leave(): void {
@@ -137,10 +201,13 @@ export const useRoomStore = defineStore('room', () => {
     sessionId.value = null
     myGraph.value = null
     originGraph.value = null
+    closeReview()
   }
 
   return {
     room, memberId, sessionId, myGraph, originGraph, busy, connected,
+    reviewingPr, prDiff, prThread, reviewLoading,
     isOwner, create, join, exec, openPr, mergePr, refreshOrigin, leave, disconnect,
+    loadReview, closeReview, submitReview, comment,
   }
 })

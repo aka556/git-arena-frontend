@@ -21,6 +21,11 @@ export interface PullRequestView {
   mergeable: 'unknown' | 'clean' | 'conflict'
   mergedByMemberId: string | null
   mergedAt: number | null
+  /** 生效中的 approve 数（同一评审者只算最新一次）。 */
+  approvals: number
+  /** 是否被「请求修改」挡住合并（database.md §4.4 闸门）。 */
+  changesRequested: boolean
+  commentCount: number
 }
 
 export interface RoomView {
