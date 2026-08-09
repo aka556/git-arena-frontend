@@ -7,13 +7,26 @@ export interface ScoreMe {
   totalPoints: number
 }
 
+/** 榜单口径（database.md §5.7）：all=累计总分，weekly/monthly=窗口内新增分。 */
+export type LeaderboardPeriod = 'all' | 'weekly' | 'monthly'
+
 export interface LeaderboardEntry {
   rank: number
   userId: number
   username: string | null
   displayName: string | null
   avatarColor: string | null
-  totalPoints: number
+  /** 含义随所属 Board 的 metric 变化：total=累计分，window=窗口内新增分。 */
+  points: number
+}
+
+export interface LeaderboardBoard {
+  period: LeaderboardPeriod
+  /** total=累计总分；window=窗口内新增分。两种口径不可混排，UI 需分别标注。 */
+  metric: 'total' | 'window'
+  /** 时段榜物化视图的最近刷新时刻（ISO-8601）；总榜为实时读，恒为 null。 */
+  refreshedAt: string | null
+  entries: LeaderboardEntry[]
 }
 
 export interface AchievementView {
