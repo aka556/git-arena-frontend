@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Button } from 'ant-design-vue'
 import type { GitGraph } from '@/types/gitGraph'
 import GitGraphView from '@/components/graph/GitGraphView.vue'
@@ -24,36 +24,50 @@ interface DragState {
   pointerId: number
   offsetX: number
   offsetY: number
+  startX: number
+  startY: number
+  moved: boolean
 }
 
 const overlayRef = ref<HTMLDivElement | null>(null)
 const cardRef = ref<HTMLElement | null>(null)
+const showRef = ref<HTMLElement | null>(null)
+/** 卡片与收起态按钮共享的位置；null = 停靠在默认锚点（图形区右上角）。 */
 const position = ref<Position | null>(null)
 const dragging = ref(false)
-const cardStyle = computed(() => position.value
-  ? { left: `${position.value.x}px`, top: `${position.value.y}px`, right: 'auto' }
+const floatStyle = computed(() => position.value
+  ? {
+      left: `${position.value.x}px`,
+      top: `${position.value.y}px`,
+      right: 'auto',
+      bottom: 'auto',
+    }
   : undefined)
 
 let dragState: DragState | null = null
+let suppressClick = false
 let resizeObserver: ResizeObserver | null = null
+
+/** 当前浮动体：展开时是卡片，收起时是「显示目标」按钮；隐藏在原位、拖动共用一套状态。 */
+function floatingEl(): HTMLElement | null {
+  return props.open ? cardRef.value : showRef.value
+}
 
 function beginDrag(event: PointerEvent): void {
   if (event.button !== 0) return
   const overlay = overlayRef.value
-  const card = cardRef.value
+  const target = floatingEl()
   const handle = event.currentTarget as HTMLElement
-  if (!overlay || !card) return
+  if (!overlay || !target) return
 
-  const overlayRect = overlay.getBoundingClientRect()
-  const cardRect = card.getBoundingClientRect()
-  position.value = {
-    x: cardRect.left - overlayRect.left,
-    y: cardRect.top - overlayRect.top,
-  }
+  const rect = target.getBoundingClientRect()
   dragState = {
     pointerId: event.pointerId,
-    offsetX: event.clientX - cardRect.left,
-    offsetY: event.clientY - cardRect.top,
+    offsetX: event.clientX - rect.left,
+    offsetY: event.clientY - rect.top,
+    startX: event.clientX,
+    startY: event.clientY,
+    moved: false,
   }
   dragging.value = true
   handle.setPointerCapture(event.pointerId)
@@ -62,8 +76,12 @@ function beginDrag(event: PointerEvent): void {
 function moveCard(event: PointerEvent): void {
   const drag = dragState
   const overlay = overlayRef.value
-  const card = cardRef.value
-  if (!drag || drag.pointerId !== event.pointerId || !overlay || !card) return
+  if (!drag || drag.pointerId !== event.pointerId || !overlay) return
+  // 首次越过阈值才把位置从 CSS 锚点固化为绝对坐标：纯点击不破坏默认停靠
+  if (!drag.moved) {
+    if (Math.abs(event.clientX - drag.startX) + Math.abs(event.clientY - drag.startY) <= 4) return
+    drag.moved = true
+  }
 
   const bounds = overlay.getBoundingClientRect()
   position.value = constrain(
@@ -76,18 +94,32 @@ function finishDrag(event: PointerEvent): void {
   if (!dragState || dragState.pointerId !== event.pointerId) return
   const handle = event.currentTarget as HTMLElement
   if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId)
+  const moved = dragState.moved
+  suppressClick = moved
   dragState = null
   dragging.value = false
+  // pointer capture 会把合成 click 的目标改写到 wrap 上，内部按钮的 @click 收不到；
+  // 收起态的「原地点击展开」因此在这里完成（pointercancel 不算点击）。
+  if (!moved && !props.open && event.type === 'pointerup') {
+    emit('update:open', true)
+  }
+}
+
+/** 收起态按钮：拖动结束后的 click 不当作「展开」。 */
+function onShowClickCapture(event: MouseEvent): void {
+  if (!suppressClick) return
+  suppressClick = false
+  event.stopPropagation()
 }
 
 function constrain(x: number, y: number): Position {
   const overlay = overlayRef.value
-  const card = cardRef.value
-  if (!overlay || !card) return { x, y }
+  const target = floatingEl()
+  if (!overlay || !target) return { x, y }
   const margin = 12
   return {
-    x: clamp(x, margin, overlay.clientWidth - card.offsetWidth - margin),
-    y: clamp(y, margin, overlay.clientHeight - card.offsetHeight - margin),
+    x: clamp(x, margin, overlay.clientWidth - target.offsetWidth - margin),
+    y: clamp(y, margin, overlay.clientHeight - target.offsetHeight - margin),
   }
 }
 
@@ -111,17 +143,22 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => resizeObserver?.disconnect())
+
+// 从按钮位置展开成卡片（尺寸变大）后，把可能越界的部分收回画布内。
+watch(() => props.open, (open) => {
+  if (open) nextTick(keepInBounds)
+})
 </script>
 
 <template>
   <div ref="overlayRef" class="goal-overlay" aria-live="polite">
-    <Transition name="goal-card">
+    <Transition name="goal-card" appear>
       <section
         v-if="props.open"
         ref="cardRef"
         class="goal-card"
         :class="{ dragging }"
-        :style="cardStyle"
+        :style="floatStyle"
         aria-label="关卡目标图"
       >
         <header
@@ -155,15 +192,28 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
     </Transition>
 
     <Transition name="goal-tab">
-      <Button
+      <div
         v-if="!props.open"
-        class="goal-show"
-        type="primary"
-        size="small"
-        @click="emit('update:open', true)"
+        ref="showRef"
+        class="goal-show-wrap"
+        :class="{ dragging }"
+        :style="floatStyle"
+        title="点击展开目标图，拖动可移动"
+        @pointerdown="beginDrag"
+        @pointermove="moveCard"
+        @pointerup="finishDrag"
+        @pointercancel="finishDrag"
+        @click.capture="onShowClickCapture"
       >
-        显示目标
-      </Button>
+        <Button
+          class="goal-show"
+          type="primary"
+          size="small"
+          @click="emit('update:open', true)"
+        >
+          显示目标
+        </Button>
+      </div>
     </Transition>
   </div>
 </template>
@@ -179,12 +229,14 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
 
 .goal-card {
   position: absolute;
+  /* 默认锚点：图形区右上角。--goal-home-offset 由宿主视图注入（=终端列宽），
+     使浮层 overlay 覆盖「图形区 + 终端区」时，默认位置仍避开终端。 */
   top: 16px;
-  right: 16px;
+  right: calc(16px + var(--goal-home-offset, 0px));
   display: flex;
   flex-direction: column;
   width: min(390px, calc(100% - 32px));
-  height: min(520px, calc(100% - 32px));
+  height: min(440px, calc(100% - 32px));
   min-height: min(300px, calc(100% - 32px));
   overflow: hidden;
   border: 1px solid #9cb2c4;
@@ -277,23 +329,47 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
   background: #f2f8f5;
 }
 
-.goal-show {
+.goal-show-wrap {
   position: absolute;
   top: 16px;
-  right: 16px;
+  right: calc(16px + var(--goal-home-offset, 0px));
   pointer-events: auto;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.goal-show-wrap.dragging {
+  cursor: grabbing;
+}
+
+.goal-show-wrap.dragging .goal-show {
+  pointer-events: none;
+}
+
+.goal-show {
   box-shadow: 0 7px 18px rgba(31, 76, 112, 0.2);
 }
 
-.goal-card-enter-active,
-.goal-card-leave-active {
-  transition: opacity 180ms ease, transform 220ms ease;
+/* 开启关卡：延迟片刻后从右上方浮现，不与初始布局争夺注意力。 */
+.goal-card-enter-active {
+  transition:
+    opacity 360ms ease 260ms,
+    transform 420ms cubic-bezier(0.22, 0.9, 0.3, 1.04) 260ms;
 }
 
-.goal-card-enter-from,
+.goal-card-leave-active {
+  transition: opacity 160ms ease, transform 200ms ease;
+}
+
+.goal-card-enter-from {
+  opacity: 0;
+  transform: translate(18px, -22px) scale(0.94);
+}
+
 .goal-card-leave-to {
   opacity: 0;
-  transform: translateY(-8px) scale(0.985);
+  transform: translateY(-10px) scale(0.98);
 }
 
 .goal-tab-enter-active,
@@ -308,10 +384,15 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
 }
 
 @media (max-width: 900px) {
+  .goal-card,
+  .goal-show-wrap {
+    top: 12px;
+    /* 窄屏下图形区太窄，默认锚点回退到整个舞台右上角 */
+    right: 12px;
+  }
+
   .goal-card {
     width: min(340px, calc(100% - 24px));
-    top: 12px;
-    right: 12px;
   }
 
   .goal-status {
@@ -326,6 +407,7 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
   .goal-tab-enter-active,
   .goal-tab-leave-active {
     transition-duration: 0ms;
+    transition-delay: 0ms;
   }
 }
 </style>
