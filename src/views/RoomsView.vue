@@ -4,12 +4,16 @@
  * 名册（化身配色，§6.3）｜「我的克隆」与「共享 origin」双图对照｜终端+面板（成员命令走同一链路 §3）｜PR 面板。
  * 房间状态经 STOMP 实时同步（他人 push / PR 变更即刷新）。
  */
-import { ref, computed, onBeforeUnmount } from 'vue'
+import { ref, computed, onBeforeUnmount, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { Avatar, Button, Card, Input, Tag, Tooltip, message } from 'ant-design-vue'
+import {
+  Avatar, Button, Card, Input, Select, SelectOption, Tag, Tooltip, message,
+} from 'ant-design-vue'
 import { useRoomStore } from '@/stores/room'
 import { useAuthStore } from '@/stores/auth'
 import type { MemberView, PullRequestView } from '@/types/room'
+import type { LevelSummary } from '@/types/level'
+import { listLevels } from '@/api/level'
 import GitGraphView from '@/components/graph/GitGraphView.vue'
 import TerminalView from '@/components/terminal/TerminalView.vue'
 import OperationPanel from '@/components/panel/OperationPanel.vue'
@@ -24,8 +28,11 @@ const terminalRef = ref<InstanceType<typeof TerminalView> | null>(null)
 // 建/加房表单（昵称默认取登录用户展示名，方便协作中辨认彼此——呼应 §6.3 化身标识）
 const createName = ref('')
 const createDisplay = ref(auth.user?.displayName ?? '')
+const createScenario = ref<string | undefined>(undefined)
+const collabLevels = ref<LevelSummary[]>([])
 const joinCode = ref('')
 const joinDisplay = ref(auth.user?.displayName ?? '')
+const validating = ref(false)
 
 // 开 PR 表单
 const prTitle = ref('')
@@ -54,7 +61,11 @@ async function onCreate(): Promise<void> {
   if (!createName.value.trim()) return message.warning('请输入房间名')
   if (!requireLogin()) return
   try {
-    await store.create(createName.value.trim(), createDisplay.value.trim() || '房主')
+    await store.create(
+      createName.value.trim(),
+      createDisplay.value.trim() || '房主',
+      createScenario.value,
+    )
     bootTerminal()
   } catch (e) {
     message.error(errMsg(e))
@@ -126,6 +137,32 @@ async function onReview(number: number): Promise<void> {
   }
 }
 
+/** 校验房间场景关卡：通过后给出明确反馈，未通过把差异原样列出（教学反馈）。 */
+async function onValidateScenario(): Promise<void> {
+  validating.value = true
+  try {
+    const res = await store.validateScenario()
+    if (res.passed) {
+      message.success('🎉 场景关卡达成！')
+    } else {
+      message.warning('还没达成目标，看看下面的差异')
+    }
+  } catch (e) {
+    message.error(errMsg(e))
+  } finally {
+    validating.value = false
+  }
+}
+
+// collab 关卡列表供建房时选场景（solo 关卡不能当房间场景，后端也会 fail-closed 拒绝）
+onMounted(async () => {
+  try {
+    collabLevels.value = (await listLevels()).filter((l) => l.mode === 'collab')
+  } catch {
+    collabLevels.value = []
+  }
+})
+
 onBeforeUnmount(() => store.disconnect())
 </script>
 
@@ -142,6 +179,16 @@ onBeforeUnmount(() => store.disconnect())
         <Card title="创建房间" class="lobby-card">
           <Input v-model:value="createName" placeholder="房间名" class="lobby-input" />
           <Input v-model:value="createDisplay" placeholder="你的昵称（可选）" class="lobby-input" />
+          <Select
+            v-model:value="createScenario"
+            class="lobby-input"
+            allow-clear
+            placeholder="场景关卡（可选，留空=自由协作）"
+          >
+            <SelectOption v-for="l in collabLevels" :key="l.slug" :value="l.slug">
+              {{ l.title }}（★{{ l.difficulty }}）
+            </SelectOption>
+          </Select>
           <Button type="primary" :loading="store.busy" block @click="onCreate">创建并进入</Button>
         </Card>
         <Card title="加入房间" class="lobby-card">
@@ -176,6 +223,28 @@ onBeforeUnmount(() => store.disconnect())
 
       <div class="room-body">
         <aside class="room-panel">
+          <Card v-if="store.scenario" size="small" class="scenario-card">
+            <template #title>
+              <span class="scenario-title">
+                场景关卡 · {{ store.scenario.title }}
+                <Tag v-if="store.scenarioPassed" color="green">已达成</Tag>
+              </span>
+            </template>
+            <p class="scenario-desc">{{ store.scenario.description }}</p>
+            <div class="scenario-goal">
+              <div class="scenario-goal-label">目标图</div>
+              <div class="scenario-goal-canvas">
+                <GitGraphView :graph="store.scenario.goalGraph" :fit="true" />
+              </div>
+            </div>
+            <Button size="small" type="primary" block :loading="validating" @click="onValidateScenario">
+              校验目标
+            </Button>
+            <ul v-if="store.scenarioResult && !store.scenarioResult.passed" class="scenario-reasons">
+              <li v-for="(r, i) in store.scenarioResult.reasons" :key="i">{{ r }}</li>
+            </ul>
+          </Card>
+
           <OperationPanel :disabled="store.busy" @run="(c: string) => onExec(c, true)" @reset="() => {}" />
 
           <Card size="small" title="Pull Requests" class="pr-card">
@@ -258,6 +327,13 @@ onBeforeUnmount(() => store.disconnect())
 .spacer { flex: 1; }
 .room-body { flex: 1; display: flex; min-height: 0; }
 .room-panel { width: 240px; border-right: 1px solid #e8e8e8; overflow: auto; background: #fff; }
+.scenario-card { margin: 8px; }
+.scenario-title { font-size: 12px; }
+.scenario-desc { margin: 0 0 8px; font-size: 12px; line-height: 1.6; color: #475467; white-space: pre-wrap; }
+.scenario-goal { margin-bottom: 8px; }
+.scenario-goal-label { margin-bottom: 4px; font-size: 11px; color: #98a2b3; }
+.scenario-goal-canvas { height: 150px; overflow: hidden; border: 1px solid #eef1f5; border-radius: 4px; }
+.scenario-reasons { margin: 8px 0 0; padding-left: 16px; font-size: 11px; color: #eb5757; }
 .pr-card { margin: 8px; }
 .pr-form { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
 .pr-item { padding: 6px 0; border-top: 1px solid #eef1f5; }

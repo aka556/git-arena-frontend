@@ -44,3 +44,12 @@ export interface RoomJoinResponse {
   sessionId: string
   graph: GitGraph
 }
+
+/** 房间场景关卡（collab 关卡的目标说明与目标图）；房间无场景时后端返回 null。 */
+export interface RoomScenarioView {
+  slug: string
+  title: string
+  description: string | null
+  difficulty: number
+  goalGraph: GitGraph
+}

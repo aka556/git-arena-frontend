@@ -10,7 +10,8 @@ import type {
   ReviewState,
   ReviewThread,
 } from '@/types/prReview'
-import type { RoomJoinResponse, RoomView } from '@/types/room'
+import type { RoomJoinResponse, RoomScenarioView, RoomView } from '@/types/room'
+import type { ValidateResponse } from '@/types/level'
 
 export function createRoom(name: string, displayName: string, scenarioLevelSlug?: string): Promise<RoomJoinResponse> {
   return request<RoomJoinResponse>({ url: '/rooms', method: 'post', data: { name, displayName, scenarioLevelSlug } })
@@ -22,6 +23,19 @@ export function joinRoom(joinCode: string, displayName: string): Promise<RoomJoi
 
 export function fetchOriginGraph(roomId: string): Promise<GitGraph> {
   return request<GitGraph>({ url: `/rooms/${roomId}/origin-graph`, method: 'get' })
+}
+
+/** 房间场景关卡（目标说明 + 目标图）；房间无场景时返回 null。 */
+export function fetchRoomScenario(roomId: string): Promise<RoomScenarioView | null> {
+  return request<RoomScenarioView | null>({ url: `/rooms/${roomId}/scenario`, method: 'get' })
+}
+
+/** 成员对自己的克隆跑场景关卡校验（prMerged 查本房 PR）。 */
+export function validateRoomScenario(roomId: string, memberId: string): Promise<ValidateResponse> {
+  return request<ValidateResponse>({
+    url: `/rooms/${roomId}/members/${memberId}/validate`,
+    method: 'post',
+  })
 }
 
 /** 成员命令：走房间成员通道（后端在 push 后广播），与终端/面板共用同一链路（§3）。 */

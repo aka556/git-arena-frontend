@@ -11,7 +11,8 @@ import { Client, type IMessage } from '@stomp/stompjs'
 import SockJS from 'sockjs-client'
 import type { CommandResponse, GitGraph } from '@/types/gitGraph'
 import type { DiffSide, InlineCommentInput, PrDiff, ReviewState, ReviewThread } from '@/types/prReview'
-import type { RoomView } from '@/types/room'
+import type { RoomScenarioView, RoomView } from '@/types/room'
+import type { ValidateResponse } from '@/types/level'
 import {
   createRoom as apiCreateRoom,
   joinRoom as apiJoinRoom,
@@ -19,10 +20,12 @@ import {
   fetchOriginGraph,
   fetchPrDiff,
   fetchPrThread,
+  fetchRoomScenario,
   memberExec,
   openPullRequest,
   mergePullRequest,
   submitPrReview,
+  validateRoomScenario,
 } from '@/api/room'
 import { useAuthStore } from './auth'
 
@@ -34,6 +37,11 @@ export const useRoomStore = defineStore('room', () => {
   const originGraph = ref<GitGraph | null>(null)
   const busy = ref(false)
   const connected = ref(false)
+
+  /** 房间场景关卡（collab 关卡）；自由协作房间为 null。 */
+  const scenario = ref<RoomScenarioView | null>(null)
+  const scenarioResult = ref<ValidateResponse | null>(null)
+  const scenarioPassed = ref(false)
 
   /** 正在评审的 PR 编号；null = 未打开评审面板。 */
   const reviewingPr = ref<number | null>(null)
@@ -83,10 +91,10 @@ export const useRoomStore = defineStore('room', () => {
     connected.value = false
   }
 
-  async function create(name: string, displayName: string): Promise<void> {
+  async function create(name: string, displayName: string, scenarioLevelSlug?: string): Promise<void> {
     busy.value = true
     try {
-      const res = await apiCreateRoom(name, displayName)
+      const res = await apiCreateRoom(name, displayName, scenarioLevelSlug)
       applyJoin(res)
     } finally {
       busy.value = false
@@ -113,8 +121,30 @@ export const useRoomStore = defineStore('room', () => {
     memberId.value = res.memberId
     sessionId.value = res.sessionId
     myGraph.value = res.graph
+    scenarioResult.value = null
+    scenarioPassed.value = false
     connectStomp(res.room.roomId)
     void refreshOrigin()
+    void loadScenario()
+  }
+
+  /** 拉取房间场景关卡（建房时选定的 collab 关卡）；自由房间置 null。 */
+  async function loadScenario(): Promise<void> {
+    if (!room.value) return
+    try {
+      scenario.value = await fetchRoomScenario(room.value.roomId)
+    } catch {
+      scenario.value = null // 场景加载失败不该挡住协作本身
+    }
+  }
+
+  /** 跑场景关卡校验（prMerged 断言查本房 PR）。 */
+  async function validateScenario(): Promise<ValidateResponse> {
+    if (!room.value || !memberId.value) throw new Error('未加入房间')
+    const res = await validateRoomScenario(room.value.roomId, memberId.value)
+    scenarioResult.value = res
+    if (res.passed) scenarioPassed.value = true
+    return res
   }
 
   /** 成员命令（终端/面板共用）。刷新自己的图；push 由后端广播触发共享图刷新。 */
@@ -206,8 +236,10 @@ export const useRoomStore = defineStore('room', () => {
 
   return {
     room, memberId, sessionId, myGraph, originGraph, busy, connected,
+    scenario, scenarioResult, scenarioPassed,
     reviewingPr, prDiff, prThread, reviewLoading,
     isOwner, create, join, exec, openPr, mergePr, refreshOrigin, leave, disconnect,
+    loadScenario, validateScenario,
     loadReview, closeReview, submitReview, comment,
   }
 })
