@@ -88,7 +88,8 @@ let canvasHeight = 0
 let reduceMotion = false
 /** 通关庆祝：burst=弹珠散开落地，recover=spring 拉回原位；resolve 在图形完全复原后触发。 */
 let celebrationPhase: 'burst' | 'recover' | null = null
-let celebrationEndsAt = 0
+let celebrationDeadline = 0
+let celebrationSettledAt = 0
 let celebrationResolve: (() => void) | null = null
 
 /** 估算文本渲染宽度：CJK 全宽、拉丁半宽，宽度只用于排布不必像素级精确。 */
@@ -356,10 +357,18 @@ function stepMotion(): boolean {
   if (!layout) return false
 
   if (celebrationPhase === 'burst') {
-    if (performance.now() >= celebrationEndsAt) {
-      celebrationPhase = 'recover' // 弹跳结束，交还给 spring 拉回原位
+    const now = performance.now()
+    const settled = stepCelebration(layout)
+    // 等所有节点都落定在地面并停留片刻，再交还给 spring 拉回原位（超时兜底防悬挂）
+    if (settled) {
+      if (celebrationSettledAt === 0) celebrationSettledAt = now
     } else {
-      stepCelebration(layout)
+      celebrationSettledAt = 0
+    }
+    const rested = celebrationSettledAt > 0 && now - celebrationSettledAt > 450
+    if (rested || now >= celebrationDeadline) {
+      celebrationPhase = 'recover'
+    } else {
       return true
     }
   }
@@ -386,23 +395,25 @@ function stepMotion(): boolean {
   return moving
 }
 
-/** 弹珠物理：重力下坠、落地反弹衰减、左右墙反弹；边控制点加速跟随避免橡皮筋失控。 */
-function stepCelebration(layout: GraphLayout): void {
+/** 弹珠物理：重力下坠、落地反弹衰减、左右墙反弹；返回是否所有节点都已落定在地面。 */
+function stepCelebration(layout: GraphLayout): boolean {
   const floor = canvasHeight - NODE_RADIUS - 10
   const leftWall = NODE_RADIUS + 8
   const rightWall = canvasWidth - NODE_RADIUS - 8
+  let settled = true
 
   for (const node of layout.nodes) {
     const point = visualPositions.get(node.id)
     const velocity = nodeVelocities.get(node.id)
     if (!point || !velocity) continue
-    velocity.y += 0.55
+    velocity.y += 0.32
     point.x += velocity.x
     point.y += velocity.y
     if (point.y > floor) {
       point.y = floor
-      velocity.y *= -0.55
-      velocity.x *= 0.92
+      velocity.y *= -0.58
+      velocity.x *= 0.94
+      if (Math.abs(velocity.y) < 1.2) velocity.y = 0 // 微弹截断，尽快安定
     }
     if (point.x < leftWall) {
       point.x = leftWall
@@ -411,15 +422,12 @@ function stepCelebration(layout: GraphLayout): void {
       point.x = rightWall
       velocity.x *= -0.7
     }
+    if (Math.abs(velocity.x) + Math.abs(velocity.y) > 0.4 || point.y < floor - 0.5) {
+      settled = false
+    }
   }
-
-  for (const edge of layout.edges) {
-    const motion = edgeMotions.get(edge.id)
-    if (!motion) continue
-    const target = desiredControls(edge)
-    springPoint(motion.c1, motion.v1, target.c1, 0.3, 0.6)
-    springPoint(motion.c2, motion.v2, target.c2, 0.3, 0.6)
-  }
+  // 弹跳期连接线已淡出，不更新边控制点；recover 阶段 spring 会把它们追回原位
+  return settled
 }
 
 /**
@@ -436,29 +444,26 @@ function celebrate(): Promise<void> {
   resetView()
 
   let centerX = 0
-  let centerY = 0
   for (const node of layout.nodes) {
     const point = visualPositions.get(node.id)
     centerX += point?.x ?? node.x
-    centerY += point?.y ?? node.y
   }
   centerX /= layout.nodes.length
-  centerY /= layout.nodes.length
 
   for (const node of layout.nodes) {
     const point = visualPositions.get(node.id)
     const velocity = nodeVelocities.get(node.id)
     if (!point || !velocity) continue
     const dx = point.x - centerX
-    const dy = point.y - centerY
-    const length = Math.max(1, Math.hypot(dx, dy))
-    const burst = 7 + Math.random() * 5
-    velocity.x = (dx / length) * burst + (Math.random() - 0.5) * 4
-    velocity.y = (dy / length) * burst - (6 + Math.random() * 5) // 先向上抛再落地
+    const length = Math.max(1, Math.abs(dx))
+    // 全部向上抛起 + 大幅水平随机：节点彼此散开后各自落地，而不是原地上下弹
+    velocity.x = (dx / length) * 2.5 + (Math.random() - 0.5) * 12
+    velocity.y = -(6 + Math.random() * 5)
   }
 
   celebrationPhase = 'burst'
-  celebrationEndsAt = performance.now() + 1900
+  celebrationSettledAt = 0
+  celebrationDeadline = performance.now() + 5000
   // 只弹节点本身：标签与提交信息淡出，待图形复原后再淡回
   if (svgRef.value) d3.select(svgRef.value).classed('celebrating', true)
   return new Promise((resolve) => {
@@ -874,14 +879,16 @@ watch(() => props.graph, render, { deep: true })
   pointer-events: none;
 }
 
-/* 通关庆祝只弹节点本体：标签与提交信息淡出，节点归位后淡回 */
+/* 通关庆祝只弹节点本体：连接线、标签与提交信息淡出，节点归位后淡回 */
 .graph-svg :deep(.msg),
-.graph-svg :deep(.layer-refs) {
+.graph-svg :deep(.layer-refs),
+.graph-svg :deep(.layer-edges) {
   transition: opacity 200ms ease;
 }
 
 .graph-svg.celebrating :deep(.msg),
-.graph-svg.celebrating :deep(.layer-refs) {
+.graph-svg.celebrating :deep(.layer-refs),
+.graph-svg.celebrating :deep(.layer-edges) {
   opacity: 0;
 }
 
