@@ -7,6 +7,7 @@ const router = createRouter({
   routes: [
     { path: '/', name: 'workbench', component: WorkbenchView },
     { path: '/rooms', name: 'rooms', component: () => import('@/views/RoomsView.vue') },
+    { path: '/level-editor', name: 'level-editor', component: () => import('@/views/LevelEditorView.vue') },
     { path: '/login', name: 'login', component: () => import('@/views/LoginView.vue'), meta: { guestOnly: true } },
   ],
 })

@@ -169,6 +169,7 @@ watch(() => store.activeLevel?.slug, (slug, previousSlug) => {
         <span>git-arena</span>
       </div>
       <RouterLink to="/rooms" class="nav-link">协作房间 →</RouterLink>
+      <RouterLink to="/level-editor" class="nav-link">关卡编辑器 →</RouterLink>
 
       <Select
         v-model:value="selectedSlug"
