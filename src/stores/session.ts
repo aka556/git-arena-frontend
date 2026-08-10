@@ -31,6 +31,8 @@ export const useSessionStore = defineStore('session', () => {
   const levelDetail = ref<LevelDetail | null>(null)
   /** 已揭示的提示条数（逐级揭示；开始/重开关卡时归零）。 */
   const revealedHints = ref(0)
+  /** 最近一次校验结果；未达成时承载"还差什么"，供目标卡片展示（开始/重开关卡时清空）。 */
+  const lastValidation = ref<ValidateResponse | null>(null)
 
   /** 新建自由沙盒会话（退出关卡模式）。 */
   async function initSession(): Promise<void> {
@@ -41,6 +43,7 @@ export const useSessionStore = defineStore('session', () => {
     goalGraph.value = null
     levelDetail.value = null
     revealedHints.value = 0
+    lastValidation.value = null
   }
 
   /**
@@ -90,6 +93,7 @@ export const useSessionStore = defineStore('session', () => {
       activeLevel.value = level
       levelDetail.value = detail
       revealedHints.value = detail.hints.filter((hint) => hint.used).length
+      lastValidation.value = null
     } finally {
       busy.value = false
     }
@@ -119,12 +123,19 @@ export const useSessionStore = defineStore('session', () => {
     useAuthStore().setTotalPoints(result.totalPoints)
   }
 
-  /** 校验当前关卡是否达成。 */
+  /**
+   * 校验当前关卡是否达成，并留下最近一次的差距原因。
+   *
+   * <p>自动校验是静默的（不打断练习），但**未达成的原因必须留痕**——否则遇到"图看着一样、
+   * 实则文件内容不符"这类断言失败时，玩家完全无从判断是自己没做完还是系统坏了。
+   */
   async function validate(): Promise<ValidateResponse> {
     if (!sessionId.value || !activeLevel.value) {
       throw new Error('当前没有进行中的关卡')
     }
-    return validateLevel(activeLevel.value.slug, sessionId.value)
+    const result = await validateLevel(activeLevel.value.slug, sessionId.value)
+    lastValidation.value = result
+    return result
   }
 
 
@@ -148,7 +159,7 @@ export const useSessionStore = defineStore('session', () => {
 
   return {
     sessionId, graph, busy,
-    levels, activeLevel, goalGraph, levelDetail, revealedHints,
+    levels, activeLevel, goalGraph, levelDetail, revealedHints, lastValidation,
     initSession, exec, reset,
     loadLevels, startLevel, validate, revealNextHint, markActiveLevelCompleted,
   }

@@ -95,7 +95,7 @@ async function autoValidate(cmd: string): Promise<void> {
   if (!store.activeLevel || sessionPassed.value) return
   if (!cmd.trim().startsWith('git ')) return // shell 命令不改变提交结构，跳过
   try {
-    const res = await store.validate()
+    const res = await store.validate() // 未达成的原因由 store 留痕，目标卡片展示「还差什么」
     if (res.passed) await celebratePass()
   } catch {
     // 偶发失败静默不打断练习；下一条 git 命令会再次触发判定
@@ -230,6 +230,9 @@ watch(() => store.activeLevel?.slug, (slug, previousSlug) => {
           :graph="store.goalGraph"
           :level-title="store.activeLevel.title"
           :completed="store.activeLevel.status === 'completed'"
+          :gap-reasons="store.lastValidation && !store.lastValidation.passed
+            ? store.lastValidation.reasons
+            : []"
         />
       </div>
     </div>

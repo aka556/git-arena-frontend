@@ -9,6 +9,8 @@ const props = defineProps<{
   graph: GitGraph | null
   levelTitle: string
   completed: boolean
+  /** 最近一次校验未达成的原因；图看不出的差异（如文件内容断言）全靠它反馈。 */
+  gapReasons?: string[]
 }>()
 
 const emit = defineEmits<{
@@ -188,6 +190,14 @@ watch(() => props.open, (open) => {
         <div class="goal-canvas">
           <GitGraphView :graph="props.graph" :fit="true" />
         </div>
+
+        <!-- 图能看出结构差异，看不出内容差异（文件内容/工作区断言）——这里补上那一半 -->
+        <div v-if="!props.completed && props.gapReasons?.length" class="goal-gap">
+          <div class="goal-gap-title">还差什么</div>
+          <ul>
+            <li v-for="(reason, i) in props.gapReasons" :key="i">{{ reason }}</li>
+          </ul>
+        </div>
       </section>
     </Transition>
 
@@ -327,6 +337,33 @@ watch(() => props.open, (open) => {
 
 .goal-canvas :deep(.graph-view) {
   background: #f2f8f5;
+}
+
+.goal-gap {
+  flex: none;
+  max-height: 132px;
+  padding: 7px 12px 9px;
+  overflow-y: auto;
+  border-top: 1px solid #d9e6de;
+  background: #fff8f6;
+}
+
+.goal-gap-title {
+  margin-bottom: 3px;
+  color: #b8552f;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.goal-gap ul {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.goal-gap li {
+  color: #8a4327;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .goal-show-wrap {
