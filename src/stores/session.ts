@@ -95,7 +95,7 @@ export const useSessionStore = defineStore('session', () => {
     }
   }
 
-  /** 逐级使用下一条提示；已使用提示由详情回读，不重复扣分。 */
+  /** 逐级使用下一条提示；已使用提示由详情回读，同一提示只记一次（不扣分）。 */
   async function revealNextHint(): Promise<void> {
     const total = levelDetail.value?.hints.length ?? 0
     if (!levelDetail.value || !activeLevel.value || revealedHints.value >= total) {

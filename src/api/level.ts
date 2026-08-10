@@ -32,7 +32,7 @@ export function validateLevel(slug: string, sessionId: string): Promise<Validate
   })
 }
 
-/** 使用一条提示：后端记录 usage、扣分并更新 hints_used。 */
+/** 使用一条提示：后端记录 usage 并更新 hints_used（不扣分）。 */
 export function useHint(slug: string, hintId: number): Promise<HintUseResponse> {
   return request<HintUseResponse>({
     url: `/levels/${slug}/hints/${hintId}/use`,
