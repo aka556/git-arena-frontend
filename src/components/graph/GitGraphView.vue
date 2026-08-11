@@ -61,6 +61,10 @@ const HEAD_ACCENT = '#e25555'
 const BRANCH_FILL = '#e8f0fe'
 const REMOTE_FILL = '#fff1e6'
 const REMOTE_TEXT = '#b55320'
+const GHOST_OPACITY = 0.34
+const GHOST_SETTLE_MS = 180
+const GHOST_HOLD_MS = 8000
+const GHOST_FADE_MS = 700
 
 /** 标签间距与「标签区 → 提交信息」间距；提交信息排在所有标签之后，避免相互遮挡。 */
 const REF_GAP = 6
@@ -673,12 +677,21 @@ function render(): void {
         }
         return path
       },
-      (update) => update,
+      (update) => update
+        .interrupt()
+        .classed('ghost', false)
+        .attr('pointer-events', null)
+        .attr('opacity', 1),
       (exit) => exit
+        .interrupt()
         .classed('ghost', true)
         .attr('pointer-events', 'none')
         .transition()
-        .duration(reduceMotion ? 0 : 780)
+        .duration(reduceMotion ? 0 : GHOST_SETTLE_MS)
+        .attr('opacity', GHOST_OPACITY)
+        .transition()
+        .delay(GHOST_HOLD_MS)
+        .duration(reduceMotion ? 0 : GHOST_FADE_MS)
         .attr('opacity', 0)
         .remove(),
     )
@@ -714,12 +727,21 @@ function render(): void {
         }
         return group
       },
-      (update) => update,
+      (update) => update
+        .interrupt()
+        .classed('ghost', false)
+        .attr('pointer-events', null)
+        .attr('opacity', 1),
       (exit) => exit
+        .interrupt()
         .classed('ghost', true)
         .attr('pointer-events', 'none')
         .transition()
-        .duration(reduceMotion ? 0 : 900)
+        .duration(reduceMotion ? 0 : GHOST_SETTLE_MS)
+        .attr('opacity', GHOST_OPACITY)
+        .transition()
+        .delay(GHOST_HOLD_MS)
+        .duration(reduceMotion ? 0 : GHOST_FADE_MS)
         .attr('opacity', 0)
         .remove(),
     )
