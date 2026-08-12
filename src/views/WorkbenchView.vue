@@ -215,7 +215,12 @@ watch(() => store.activeLevel?.slug, (slug, previousSlug) => {
               <span class="current-label-mark"></span>
               当前图
             </div>
-            <GitGraphView ref="graphRef" :graph="store.graph" :interactive="true" />
+            <GitGraphView
+              :key="store.sessionId ?? 'no-session'"
+              ref="graphRef"
+              :graph="store.graph"
+              :interactive="true"
+            />
           </section>
         </main>
 
