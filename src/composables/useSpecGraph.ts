@@ -25,6 +25,7 @@ function toCommits(commits: SpecCommit[] | null | undefined): CommitNode[] {
       author: c.author ?? 'arena',
       timestamp: BASE_EPOCH + 60 * index,
       seq: c.seq,
+      unreachable: false,
     }
   })
 }
@@ -52,7 +53,7 @@ export function specToGraph(spec: SpecGraphLike | null | undefined): GitGraph {
   const untracked = Array.isArray(wd?.untracked) ? (wd?.untracked as string[]) : []
 
   return {
-    version: 1,
+    version: 2,
     commits: toCommits(source.commits),
     branches,
     tags,

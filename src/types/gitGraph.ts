@@ -14,6 +14,11 @@ export interface CommitNode {
   timestamp: number
   /** 稳定序号 C1、C2…（最老为 C1），教学对照用 */
   seq: string
+  /**
+   * 已不被任何引用可达（reset/rebase/切离游离线后的孤儿提交）。
+   * git 并不删除它们（reflog 可找回），故图上画成幽灵节点而非抹掉（§6.3）。
+   */
+  unreachable: boolean
 }
 
 export interface BranchRef {

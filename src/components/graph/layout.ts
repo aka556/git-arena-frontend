@@ -17,6 +17,8 @@ export interface LaidCommit {
   seq: string
   message: string
   author: string
+  /** 已不被引用可达（幽灵节点，§6.3） */
+  unreachable: boolean
   lane: number
   x: number
   y: number
@@ -26,6 +28,8 @@ export interface LaidEdge {
   id: string
   source: string
   target: string
+  /** Source commit is unreachable, so this edge belongs to a persistent ghost line. */
+  unreachable: boolean
   x1: number
   y1: number
   x2: number
@@ -52,6 +56,7 @@ function rowY(row: number): number {
 export function layoutGraph(graph: GitGraph): GraphLayout {
   const commits = graph.commits
   const known = new Set(commits.map((c) => c.id))
+  const byId = new Map(commits.map((c) => [c.id, c]))
 
   // lanes[k] = 该泳道当前"等待落位"的父提交 id（某个已放置的子提交指向它）
   const lanes: (string | null)[] = []
@@ -79,7 +84,16 @@ export function layoutGraph(graph: GitGraph): GraphLayout {
     const x = laneX(lane)
     const y = rowY(row)
     positions.set(c.id, { x, y, lane })
-    nodes.push({ id: c.id, seq: c.seq, message: c.message, author: c.author, lane, x, y })
+    nodes.push({
+      id: c.id,
+      seq: c.seq,
+      message: c.message,
+      author: c.author,
+      unreachable: c.unreachable === true,
+      lane,
+      x,
+      y,
+    })
 
     // 本泳道沿首父延续；其余父（merge）另占泳道以对齐
     const firstParent = c.parents.length > 0 ? c.parents[0]! : null
@@ -104,6 +118,7 @@ export function layoutGraph(graph: GitGraph): GraphLayout {
         id: `${c.id}->${parentId}`,
         source: c.id,
         target: parentId,
+        unreachable: byId.get(c.id)?.unreachable === true,
         x1: from.x,
         y1: from.y,
         x2: to.x,

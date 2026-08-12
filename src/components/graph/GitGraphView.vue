@@ -695,6 +695,7 @@ function render(): void {
         .attr('opacity', 0)
         .remove(),
     )
+    .classed('unreachable', (edge) => edge.unreachable)
 
   const node = nodes
     .selectAll<SVGGElement, LaidCommit>('g.commit')
@@ -746,7 +747,10 @@ function render(): void {
         .remove(),
     )
     .classed('draggable', props.interactive)
-    .attr('aria-label', (commit) => `${commit.seq} ${commit.message}`)
+    // Persistent ghost commits come from the snapshot itself, unlike exit ghosts that fade out.
+    .classed('unreachable', (commit) => commit.unreachable)
+    .attr('aria-label', (commit) => `${commit.seq} ${commit.message}`
+      + (commit.unreachable ? '（不可达，可用 git reflog 找回）' : ''))
 
   node.select<SVGTextElement>('text.seq').text((commit) => commit.seq)
   node.select<SVGTextElement>('text.msg')
@@ -868,8 +872,28 @@ watch(() => props.graph, render, { deep: true })
   pointer-events: none;
 }
 
+.graph-svg :deep(.edge.unreachable) {
+  opacity: 0.38;
+  stroke-dasharray: 5 5;
+}
+
 .graph-svg :deep(.commit) {
   outline: none;
+}
+
+.graph-svg :deep(.commit.unreachable) {
+  opacity: 0.56;
+}
+
+.graph-svg :deep(.commit.unreachable .commit-node) {
+  fill: #7f8ea3;
+  stroke: #d8dee8;
+  filter: none;
+}
+
+.graph-svg :deep(.commit.unreachable .seq),
+.graph-svg :deep(.commit.unreachable .msg) {
+  fill: #667487;
 }
 
 .graph-svg :deep(.commit.draggable) {
