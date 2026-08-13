@@ -13,10 +13,10 @@ const router = createRouter({
 })
 
 // 认证是可选的（匿名沙盒/关卡照常可玩，CurrentUser 可选认证）：不硬拦工作台/房间。
-// 仅当已登录用户访问登录页时回跳，避免重复登录。
+// 仅当正式账号访问登录页时回跳，避免重复登录；游客放行——他们要走登录页的注册页签升级为正式账号。
 router.beforeEach((to) => {
   const auth = useAuthStore()
-  if (to.meta.guestOnly && auth.isAuthenticated) {
+  if (to.meta.guestOnly && auth.isAuthenticated && !auth.isGuest) {
     const redirect = to.query.redirect
     return typeof redirect === 'string' && redirect.startsWith('/') ? redirect : '/'
   }
