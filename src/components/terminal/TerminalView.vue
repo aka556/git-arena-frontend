@@ -152,6 +152,39 @@ function writeSystem(message: string): void {
   term?.write('\x1b[90m' + message.replace(/\n/g, '\r\n') + '\x1b[0m\r\n')
 }
 
+function fallbackCopy(text: string): void {
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', 'true')
+  textarea.style.position = 'fixed'
+  textarea.style.opacity = '0'
+  document.body.appendChild(textarea)
+  textarea.select()
+  document.execCommand('copy')
+  textarea.remove()
+}
+
+async function copySelection(): Promise<void> {
+  const selected = term?.getSelection() ?? ''
+  if (!selected) return
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable')
+    await navigator.clipboard.writeText(selected)
+  } catch {
+    fallbackCopy(selected)
+  }
+}
+
+async function pasteFromClipboard(): Promise<void> {
+  if (!term || !navigator.clipboard?.readText) return
+  try {
+    const text = await navigator.clipboard.readText()
+    if (text) term.paste(text)
+  } catch {
+    // Clipboard permission may be unavailable; keep the terminal input unchanged.
+  }
+}
+
 function focus(): void {
   term?.focus()
 }
@@ -189,6 +222,26 @@ onMounted(() => {
   term.loadAddon(fit)
   term.open(container.value)
   fit.fit()
+  term.attachCustomKeyEventHandler((event) => {
+    if (event.type !== 'keydown' || (!event.ctrlKey && !event.metaKey)) return true
+
+    const key = event.key.toLowerCase()
+    if (key === 'c' && term?.hasSelection()) {
+      event.preventDefault()
+      event.stopPropagation()
+      void copySelection()
+      return false
+    }
+
+    if (key === 'v') {
+      event.preventDefault()
+      event.stopPropagation()
+      void pasteFromClipboard()
+      return false
+    }
+
+    return true
+  })
   term.onData(onData)
 
   resizeObserver = new ResizeObserver(() => fit?.fit())
