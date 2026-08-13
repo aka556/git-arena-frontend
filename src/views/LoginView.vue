@@ -18,7 +18,7 @@ const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 
-const activeTab = ref<'login' | 'register'>('login')
+const activeTab = ref<'login' | 'register'>(auth.isGuest ? 'register' : 'login')
 const submitting = ref(false)
 
 const loginForm = reactive({ usernameOrEmail: '', password: '' })
@@ -71,13 +71,14 @@ async function onRegister(): Promise<void> {
   }
   submitting.value = true
   try {
+    const upgrading = auth.isGuest
     await auth.register({
       username: registerForm.username.trim(),
       password: registerForm.password,
       email: email || undefined,
       code: code || undefined,
     })
-    message.success('注册成功，已登录')
+    message.success(upgrading ? '已升级为正式账号，进度已保留' : '注册成功，已登录')
     router.replace(redirectTarget())
   } catch (e) {
     message.error(errMsg(e))
@@ -177,8 +178,11 @@ onUnmounted(() => {
               </Button>
             </div>
             <p class="hint">只填用户名+密码即可注册；填邮箱并验证可用于找回与登录。</p>
+            <p v-if="auth.isGuest" class="hint hint-keep">
+              你正以游客身份体验，注册后当前进度、积分与成就将保留到新账号。
+            </p>
             <Button type="primary" size="large" block html-type="submit" :loading="submitting">
-              注册并登录
+              {{ auth.isGuest ? '升级为正式账号' : '注册并登录' }}
             </Button>
           </form>
         </TabPane>
@@ -232,6 +236,9 @@ onUnmounted(() => {
   font-size: 12px;
   color: #98a2b3;
   margin: -2px 0 2px;
+}
+.hint-keep {
+  color: #2f80ed;
 }
 .guest-row {
   text-align: center;
