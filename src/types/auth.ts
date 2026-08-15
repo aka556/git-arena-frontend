@@ -16,10 +16,10 @@ export interface AuthResponse {
   user: UserView
 }
 
-/** 注册入参：只填 username+password 直注；带 email+code 走邮箱验证路径。 */
+/** 注册入参：邮箱与验证码为必填（后端已改为 @NotBlank）。 */
 export interface RegisterPayload {
   username: string
   password: string
-  email?: string
-  code?: string
+  email: string
+  code: string
 }
