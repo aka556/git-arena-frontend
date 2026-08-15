@@ -28,7 +28,6 @@ async function onReveal(): Promise<void> {
   revealing.value = true
   try {
     await store.revealNextHint()
-    message.success('提示已展示')
   } catch (error) {
     message.error(error instanceof Error ? error.message : String(error))
   } finally {
