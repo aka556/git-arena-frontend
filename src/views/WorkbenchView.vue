@@ -5,8 +5,8 @@
  * <p>本页是命令的<b>唯一编排点</b>：终端回车与面板按钮都汇到统一执行链路（§3 黄金法则）。
  * 关卡模式下当前图占满画布，目标图以可移动浮窗叠加展示；两图仍共用同一确定性布局，校验走后端结构匹配。
  */
-import { ref, onMounted, watch } from 'vue'
-import { Button, Select, Modal, message } from 'ant-design-vue'
+import { h, ref, onMounted, watch } from 'vue'
+import { Button, Modal, message } from 'ant-design-vue'
 import { useSessionStore } from '@/stores/session'
 import { useAuthStore } from '@/stores/auth'
 import { useProgressStore } from '@/stores/progress'
@@ -16,6 +16,8 @@ import GitGraphView from '@/components/graph/GitGraphView.vue'
 import TerminalView from '@/components/terminal/TerminalView.vue'
 import OperationPanel from '@/components/panel/OperationPanel.vue'
 import LevelHintDrawer from '@/components/level/LevelHintDrawer.vue'
+import LevelSelectModal from '@/components/level/LevelSelectModal.vue'
+import { nextRecommended } from '@/components/level/levelChapters'
 import GoalGraphCard from '@/components/level/GoalGraphCard.vue'
 import EngagementDrawer from '@/components/engagement/EngagementDrawer.vue'
 import UserMenu from '@/components/auth/UserMenu.vue'
@@ -28,7 +30,7 @@ const engagement = useEngagementStore()
 const terminalRef = ref<InstanceType<typeof TerminalView> | null>(null)
 const graphRef = ref<InstanceType<typeof GitGraphView> | null>(null)
 const starting = ref(false)
-const selectedSlug = ref<string | undefined>(undefined)
+const levelSelectOpen = ref(false)
 const hintOpen = ref(false)
 const engagementOpen = ref(false)
 const goalOpen = ref(true)
@@ -43,7 +45,7 @@ async function bootFreeSandbox(): Promise<void> {
   starting.value = true
   try {
     await store.initSession()
-    selectedSlug.value = undefined
+    levelSelectOpen.value = false
     terminalRef.value?.boot([
       'git-arena · 自由沙盒',
       '试试： git init → touch a.txt → git add . → git commit -m "init" → git branch/switch/merge',
@@ -56,16 +58,13 @@ async function bootFreeSandbox(): Promise<void> {
   }
 }
 
-async function onStartLevel(): Promise<void> {
-  const level = store.levels.find((l: LevelSummary) => l.slug === selectedSlug.value)
-  if (!level) {
-    message.warning('请先选择一个关卡')
-    return
-  }
+/** 开始/重开一个关卡（来自选关弹窗或「重开本关」按钮）。 */
+async function onStartLevel(level: LevelSummary): Promise<void> {
   starting.value = true
   try {
     await store.startLevel(level)
     sessionPassed.value = false
+    levelSelectOpen.value = false
     terminalRef.value?.boot([
       `关卡：${level.title}（难度 ${'★'.repeat(level.difficulty)}）`,
       '让当前仓库达到目标图的状态，达成后会自动判定通关。',
@@ -77,17 +76,28 @@ async function onStartLevel(): Promise<void> {
   }
 }
 
-/** 通关流程：刷新进度 → 弹珠庆祝动画（图形复原后）→ 恭喜消息。 */
+/** 通关流程：刷新进度 → 弹珠庆祝动画（图形复原后）→ 恭喜并推荐下一关。 */
 async function celebratePass(): Promise<void> {
   sessionPassed.value = true
-  const title = store.activeLevel?.title ?? ''
+  const passed = store.activeLevel
+  const title = passed?.title ?? ''
   store.markActiveLevelCompleted()
   await Promise.all([progress.load(), store.loadLevels(), auth.refresh().catch(() => undefined)])
   await (graphRef.value?.celebrate() ?? Promise.resolve())
-  Modal.success({
-    title: '🎉 恭喜通关！',
-    content: title ? `已完成「${title}」，仓库结构与目标一致。` : '仓库结构与目标一致。',
-  })
+  const body = title ? `已完成「${title}」，仓库结构与目标一致。` : '仓库结构与目标一致。'
+  const next = nextRecommended(store.levels, passed?.slug)
+  if (next) {
+    Modal.confirm({
+      title: '恭喜通关！',
+      icon: () => h('span', { style: 'font-size:22px;margin-right:8px' }, '🎉'),
+      content: body,
+      okText: `下一关：${next.title}`,
+      cancelText: '留在本关',
+      onOk: () => onStartLevel(next),
+    })
+  } else {
+    Modal.success({ title: '🎉 恭喜通关！', content: body })
+  }
 }
 
 /** 自动校验（oh-my-git / Learning Git Branching 风格）：git 命令成功后静默判定，通过即庆祝。 */
@@ -171,28 +181,25 @@ watch(() => store.activeLevel?.slug, (slug, previousSlug) => {
       <RouterLink to="/rooms" class="nav-link">协作房间 →</RouterLink>
       <RouterLink to="/level-editor" class="nav-link">关卡编辑器 →</RouterLink>
 
-      <Select
-        v-model:value="selectedSlug"
-        class="level-select"
+      <Button size="small" class="level-map-btn" @click="levelSelectOpen = true">
+        🗺 关卡地图
+        <span v-if="auth.isAuthenticated && progress.completedCount > 0" class="map-btn-progress">
+          {{ progress.completedCount }}/{{ store.levels.length }}
+        </span>
+      </Button>
+      <Button
+        v-if="store.activeLevel"
         size="small"
-        placeholder="选择关卡…"
-        :options="store.levels.map((l: LevelSummary) => ({
-          value: l.slug,
-          label: `${l.status === 'completed' ? '✓ ' : ''}[${l.category}] ${l.title} ${'★'.repeat(l.difficulty)}${l.status === 'in_progress' ? ' · 进行中' : l.status === 'locked' ? ' · 锁定' : ''}`,
-          disabled: l.status === 'locked',
-        }))"
-      />
-      <Button size="small" type="primary" :loading="starting" @click="onStartLevel">
-        {{ store.activeLevel && store.activeLevel.slug === selectedSlug ? '重开关卡' : '开始关卡' }}
+        :loading="starting"
+        @click="store.activeLevel && onStartLevel(store.activeLevel)"
+      >
+        重开本关
       </Button>
       <Button v-if="store.activeLevel" size="small" @click="hintOpen = true">
         提示{{ store.revealedHints > 0 ? ` ${store.revealedHints}/${store.levelDetail?.hints.length ?? 0}` : '' }}
       </Button>
 
       <div class="spacer"></div>
-      <span v-if="auth.isAuthenticated && progress.completedCount > 0" class="progress-badge">
-        已通关 {{ progress.completedCount }}/{{ store.levels.length }}
-      </span>
       <span v-if="store.activeLevel" class="level-badge">{{ store.activeLevel.title }}</span>
       <span class="session">会话：{{ store.sessionId ? store.sessionId.slice(0, 8) : '未连接' }}</span>
       <Button size="small" @click="engagementOpen = true">
@@ -242,6 +249,12 @@ watch(() => store.activeLevel?.slug, (slug, previousSlug) => {
       </div>
     </div>
 
+    <LevelSelectModal
+      v-model:open="levelSelectOpen"
+      :starting="starting"
+      @start="onStartLevel"
+      @free="bootFreeSandbox"
+    />
     <LevelHintDrawer v-model:open="hintOpen" />
     <EngagementDrawer v-model:open="engagementOpen" />
   </div>
@@ -285,8 +298,18 @@ watch(() => store.activeLevel?.slug, (slug, previousSlug) => {
   color: #2f80ed;
   margin-right: 12px;
 }
-.level-select {
-  width: 260px;
+.level-map-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.map-btn-progress {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #e9f7ef;
+  color: #27ae60;
+  font-size: 11px;
+  font-family: 'Cascadia Code', Consolas, monospace;
 }
 .spacer {
   flex: 1;
@@ -295,13 +318,6 @@ watch(() => store.activeLevel?.slug, (slug, previousSlug) => {
   font-size: 12px;
   color: #2f80ed;
   background: #e8f0fe;
-  padding: 2px 8px;
-  border-radius: 4px;
-}
-.progress-badge {
-  font-size: 12px;
-  color: #27ae60;
-  background: #e9f7ef;
   padding: 2px 8px;
   border-radius: 4px;
 }
