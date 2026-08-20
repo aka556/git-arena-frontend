@@ -9,6 +9,14 @@ import { useRouter } from 'vue-router'
 import {
   Avatar, Button, Card, Input, Select, SelectOption, Tag, Tooltip, message,
 } from 'ant-design-vue'
+import {
+  ArrowLeftOutlined,
+  ArrowRightOutlined,
+  BranchesOutlined,
+  LinkOutlined,
+  PlusOutlined,
+  TeamOutlined,
+} from '@ant-design/icons-vue'
 import { useRoomStore } from '@/stores/room'
 import { useAuthStore } from '@/stores/auth'
 import type { MemberView, PullRequestView } from '@/types/room'
@@ -168,46 +176,107 @@ onBeforeUnmount(() => store.disconnect())
 
 <template>
   <div class="rooms">
-    <!-- 未入房：建 / 加房 -->
+    <!-- 未入房：协作大厅 -->
     <div v-if="!store.room" class="lobby">
       <div class="lobby-top">
-        <RouterLink to="/" class="nav-link">← 工作台</RouterLink>
+        <RouterLink to="/" class="nav-link">
+          <ArrowLeftOutlined />
+          <span>返回工作台</span>
+        </RouterLink>
         <div class="spacer" />
         <UserMenu />
       </div>
-      <div class="lobby-cards">
-        <Card title="创建房间" class="lobby-card">
-          <Input v-model:value="createName" placeholder="房间名" class="lobby-input" />
-          <Input v-model:value="createDisplay" placeholder="你的昵称（可选）" class="lobby-input" />
-          <Select
-            v-model:value="createScenario"
-            class="lobby-input"
-            allow-clear
-            placeholder="场景关卡（可选，留空=自由协作）"
-          >
-            <SelectOption v-for="l in collabLevels" :key="l.slug" :value="l.slug">
-              {{ l.title }}（★{{ l.difficulty }}）
-            </SelectOption>
-          </Select>
-          <Button type="primary" :loading="store.busy" block @click="onCreate">创建并进入</Button>
-        </Card>
-        <Card title="加入房间" class="lobby-card">
-          <Input v-model:value="joinCode" placeholder="邀请码" class="lobby-input" />
-          <Input v-model:value="joinDisplay" placeholder="你的昵称（可选）" class="lobby-input" />
-          <Button :loading="store.busy" block @click="onJoin">加入</Button>
-        </Card>
-      </div>
+      <main class="lobby-main">
+        <section class="lobby-intro">
+          <div class="intro-mark"><TeamOutlined /></div>
+          <p class="lobby-eyebrow">COLLABORATION LAB / 01</p>
+          <h1>把 Git 练习，<br /><em>变成一次真实协作。</em></h1>
+          <p class="lobby-copy">
+            创建一个共享仓库，邀请队友一起练习分支、推拉、冲突与 Pull Request。
+            每个人都有自己的克隆，提交图会在你们眼前同步生长。
+          </p>
+          <div class="lobby-flow" aria-label="协作流程">
+            <span><i>01</i>建房或加入</span>
+            <b>→</b>
+            <span><i>02</i>各自提交</span>
+            <b>→</b>
+            <span><i>03</i>合并协作</span>
+          </div>
+          <div class="lobby-note">
+            <BranchesOutlined />
+            <span>实时看到自己的克隆与共享 origin，两张图始终对照。</span>
+          </div>
+        </section>
+
+        <section class="lobby-actions" aria-label="房间操作">
+          <Card class="lobby-card create-card" :bordered="false">
+            <div class="card-kicker"><PlusOutlined /> <span>HOST A ROOM</span></div>
+            <h2>创建房间</h2>
+            <p class="card-copy">你来设定练习场景，生成邀请码后邀请队友加入。</p>
+            <form class="lobby-form" @submit.prevent="onCreate">
+              <label class="lobby-field">
+                <span>房间名称</span>
+                <Input v-model:value="createName" size="large" placeholder="例如：周三 Git 练习" autocomplete="off" />
+              </label>
+              <label class="lobby-field">
+                <span>你的昵称 <small>可选</small></span>
+                <Input v-model:value="createDisplay" size="large" placeholder="在房间里显示的名字" autocomplete="nickname" />
+              </label>
+              <label class="lobby-field">
+                <span>练习场景 <small>可选</small></span>
+                <Select
+                  v-model:value="createScenario"
+                  size="large"
+                  class="lobby-select"
+                  allow-clear
+                  placeholder="自由协作，或选择一张关卡"
+                >
+                  <SelectOption v-for="l in collabLevels" :key="l.slug" :value="l.slug">
+                    {{ l.title }}（★{{ l.difficulty }}）
+                  </SelectOption>
+                </Select>
+              </label>
+              <Button class="lobby-primary" type="primary" size="large" html-type="submit" :loading="store.busy" block>
+                创建并进入
+                <ArrowRightOutlined />
+              </Button>
+            </form>
+          </Card>
+
+          <Card class="lobby-card join-card" :bordered="false">
+            <div class="card-kicker join-kicker"><LinkOutlined /> <span>JOIN A ROOM</span></div>
+            <h2>加入房间</h2>
+            <p class="card-copy">输入队友分享的邀请码，立即进入同一个远程仓库。</p>
+            <form class="lobby-form" @submit.prevent="onJoin">
+              <label class="lobby-field">
+                <span>邀请码</span>
+                <Input v-model:value="joinCode" size="large" placeholder="例如：A7K-29Q" autocomplete="off" @pressEnter="onJoin" />
+              </label>
+              <label class="lobby-field">
+                <span>你的昵称 <small>可选</small></span>
+                <Input v-model:value="joinDisplay" size="large" placeholder="在房间里显示的名字" autocomplete="nickname" />
+              </label>
+              <div class="join-spacer" aria-hidden="true" />
+              <Button class="lobby-secondary" size="large" html-type="submit" :loading="store.busy" block>
+                加入房间
+                <ArrowRightOutlined />
+              </Button>
+            </form>
+            <p class="join-hint">没有邀请码？让队友先创建房间并分享给你。</p>
+          </Card>
+        </section>
+      </main>
     </div>
 
     <!-- 入房后 -->
     <div v-else class="room">
       <header class="room-bar">
-        <span class="room-name">{{ store.room.name }}</span>
-        <Tag color="blue">邀请码 {{ store.room.joinCode }}</Tag>
+        <span class="room-name">{{ store.room?.name }}</span>
+        <Tag color="blue">邀请码 {{ store.room?.joinCode }}</Tag>
         <span :class="['ws-dot', { on: store.connected }]" />
         <div class="roster">
           <Tooltip
-            v-for="m in store.room.members"
+            v-for="m in store.room?.members ?? []"
             :key="m.memberId"
             :title="`${m.displayName}${m.role === 'owner' ? '（房主）' : ''}${m.memberId === store.memberId ? ' · 你' : ''}`"
           >
@@ -285,7 +354,7 @@ onBeforeUnmount(() => store.disconnect())
               <div class="pr-line"><b>#{{ pr.number }}</b> {{ pr.title }} <Tag color="purple">{{ pr.status }}</Tag></div>
               <Button size="small" type="link" @click="onReview(pr.number)">查看评审</Button>
             </div>
-            <p v-if="store.room.pullRequests.length === 0" class="pr-empty">还没有 PR</p>
+            <p v-if="store.room?.pullRequests.length === 0" class="pr-empty">还没有 PR</p>
           </Card>
         </aside>
 
@@ -312,12 +381,74 @@ onBeforeUnmount(() => store.disconnect())
 
 <style scoped>
 .rooms { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
-.lobby { display: flex; flex-direction: column; height: 100%; background: #f5f7fa; }
-.lobby-top { display: flex; align-items: center; gap: 8px; height: 48px; padding: 0 16px; background: #fff; border-bottom: 1px solid #e8e8e8; }
-.lobby-top .nav-link { font-size: 13px; color: #2f80ed; }
-.lobby-cards { flex: 1; display: flex; gap: 24px; justify-content: center; align-items: center; }
-.lobby-card { width: 300px; }
-.lobby-input { margin-bottom: 10px; }
+.lobby { position: relative; display: flex; flex-direction: column; height: 100%; overflow: auto; color: #172b3a; background: #edf4f1; }
+.lobby::before { position: absolute; inset: 0; pointer-events: none; content: ''; opacity: .46; background: radial-gradient(circle at 10% 18%, rgba(83, 154, 124, .22), transparent 34%), radial-gradient(circle at 89% 76%, rgba(242, 182, 104, .16), transparent 30%), linear-gradient(135deg, rgba(255,255,255,.42), transparent 48%); }
+.lobby-top { position: relative; z-index: 1; display: flex; align-items: center; gap: 8px; height: 58px; flex: none; padding: 0 clamp(20px, 5vw, 72px); border-bottom: 1px solid rgba(39, 74, 64, .1); background: rgba(248, 252, 250, .74); backdrop-filter: blur(12px); }
+.lobby-top .nav-link { display: inline-flex; align-items: center; gap: 8px; color: #315c50; font-size: 13px; font-weight: 600; text-decoration: none; transition: color 140ms ease, transform 140ms ease; }
+.lobby-top .nav-link:hover { color: #16735b; transform: translateX(-2px); }
+.lobby-main { position: relative; z-index: 1; display: grid; grid-template-columns: minmax(260px, .82fr) minmax(540px, 1.18fr); gap: clamp(34px, 7vw, 110px); align-items: center; width: min(1180px, calc(100% - 48px)); margin: 0 auto; padding: clamp(48px, 8vh, 96px) 0; }
+.lobby-intro { max-width: 470px; }
+.intro-mark { display: grid; place-items: center; width: 44px; height: 44px; margin-bottom: 22px; border: 1px solid rgba(30, 98, 77, .2); border-radius: 13px; color: #1c8064; background: rgba(255,255,255,.56); box-shadow: 0 8px 22px rgba(36, 95, 77, .08); font-size: 20px; }
+.lobby-eyebrow, .card-kicker { margin: 0; color: #3b8b73; font-size: 10px; font-weight: 800; letter-spacing: .2em; }
+.lobby-intro h1 { margin: 12px 0 18px; color: #193a35; font-size: clamp(34px, 3.6vw, 52px); font-weight: 700; letter-spacing: 0; line-height: 1.05; }
+.lobby-intro h1 em { color: #d17b40; font-style: normal; }
+.lobby-copy { max-width: 420px; margin: 0; color: #5d716d; font-size: 15px; line-height: 1.85; }
+.lobby-flow { display: flex; align-items: center; gap: 10px; margin-top: 34px; color: #45645e; font-size: 11px; font-weight: 700; }
+.lobby-flow span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.lobby-flow i { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; color: #fff; background: #398a70; font-family: 'Cascadia Code', Consolas, monospace; font-size: 9px; font-style: normal; }
+.lobby-flow b { color: #a0b3ac; font-size: 16px; font-weight: 400; }
+.lobby-note { display: flex; align-items: center; gap: 9px; max-width: 390px; margin-top: 34px; padding-top: 15px; border-top: 1px solid rgba(52, 105, 87, .16); color: #77908a; font-size: 12px; line-height: 1.55; }
+.lobby-note :deep(svg) { flex: none; color: #3d9a78; font-size: 16px; }
+.lobby-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.lobby-card { display: flex; flex-direction: column; box-sizing: border-box; min-height: 442px; padding: 30px 30px 28px; border: 1px solid rgba(52, 91, 77, .12); border-radius: 18px; box-shadow: 0 20px 48px rgba(42, 84, 70, .1); transition: transform 180ms ease, box-shadow 180ms ease; }
+.lobby-card:hover { transform: translateY(-4px); box-shadow: 0 26px 56px rgba(42, 84, 70, .15); }
+.lobby-card :deep(.ant-card-body) { display: flex; flex: 1; flex-direction: column; min-height: 0; padding: 0; }
+.create-card { background: linear-gradient(145deg, #fff 0%, #f8fcfa 100%); }
+.join-card { background: linear-gradient(145deg, #fdfbf7 0%, #fff 100%); }
+.card-kicker { display: flex; align-items: center; gap: 7px; color: #39876f; }
+.card-kicker :deep(svg) { font-size: 14px; }
+.join-kicker { color: #c07a43; }
+.lobby-card h2 { margin: 11px 0 7px; color: #203d38; font-size: 25px; letter-spacing: 0; }
+.card-copy { min-height: 42px; margin: 0 0 25px; color: #73827e; font-size: 12px; line-height: 1.7; }
+.lobby-form { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.lobby-field { display: flex; flex-direction: column; gap: 7px; margin-bottom: 17px; color: #526862; font-size: 11px; font-weight: 700; letter-spacing: .02em; }
+.lobby-field small { margin-left: 4px; color: #a4b2ad; font-size: 10px; font-weight: 500; }
+.lobby-field :deep(.ant-input), .lobby-field :deep(.ant-select-selector) { border-color: #d8e6df !important; border-radius: 9px !important; box-shadow: none !important; }
+.lobby-field :deep(.ant-input:hover), .lobby-field :deep(.ant-select-selector:hover) { border-color: #77b69e !important; }
+.lobby-select { width: 100%; }
+.lobby-primary, .lobby-secondary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 44px; margin-top: auto; border-radius: 9px; font-size: 13px; font-weight: 700; }
+.lobby-primary { border: none; background: #287a61; box-shadow: 0 8px 16px rgba(40, 122, 97, .2); }
+.lobby-primary:hover { background: #1e684f !important; }
+.lobby-secondary { color: #b56732; border-color: #e7c7a9; background: #fffaf5; }
+.lobby-secondary:hover { color: #995324 !important; border-color: #d89561 !important; }
+.join-spacer { flex: 1; min-height: 30px; }
+.join-hint { margin: 16px 0 0; color: #9b9b8f; font-size: 11px; line-height: 1.55; }
+
+@media (max-width: 920px) {
+  .lobby-main { grid-template-columns: 1fr; gap: 38px; align-items: start; max-width: 680px; padding-top: 54px; }
+  .lobby-intro { max-width: 620px; text-align: center; }
+  .intro-mark { margin-right: auto; margin-left: auto; }
+  .lobby-copy { margin-right: auto; margin-left: auto; }
+  .lobby-flow, .lobby-note { justify-content: center; margin-right: auto; margin-left: auto; }
+  .lobby-note { text-align: left; }
+}
+
+@media (max-width: 620px) {
+  .lobby-top { height: 52px; padding: 0 16px; }
+  .lobby-main { width: calc(100% - 32px); gap: 30px; padding: 34px 0 48px; }
+  .lobby-intro h1 { font-size: clamp(33px, 10vw, 42px); }
+  .lobby-copy { font-size: 13px; line-height: 1.7; }
+  .lobby-flow { flex-wrap: wrap; gap: 7px; justify-content: center; margin-top: 24px; }
+  .lobby-flow b { display: none; }
+  .lobby-note { margin-top: 24px; text-align: left; }
+  .lobby-actions { grid-template-columns: 1fr; }
+  .lobby-card { min-height: 0; padding: 25px 22px 23px; }
+  .card-copy { min-height: 0; margin-bottom: 22px; }
+  .lobby-form { height: auto; }
+  .join-spacer { display: none; }
+  .lobby-primary, .lobby-secondary { margin-top: 10px; }
+}
+
 .room { display: flex; flex-direction: column; height: 100%; }
 .room-bar { display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 16px; background: #fff; border-bottom: 1px solid #e8e8e8; }
 .room-name { font-weight: 700; color: #2f80ed; }
