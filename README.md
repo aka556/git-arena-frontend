@@ -1,129 +1,219 @@
 <div align="center">
 
-# git-arena-frontend
+# git-arena 前端
 
-**图形化 DAG 视图 + 真实命令行终端共存** — 直观看到每一条 git 命令如何改变提交图，进而看懂版本控制、练会多人协作。
+**一个把 Git 提交图、真实命令行和协作练习放在同一个工作台里的学习平台。**
 
 <p>
-  <img alt="Vue" src="https://img.shields.io/badge/Vue-3.5.38-4FC08D?style=flat-square&logo=vuedotjs&logoColor=white">
-  <img alt="Vite" src="https://img.shields.io/badge/Vite-6.0-646CFF?style=flat-square&logo=vite&logoColor=white">
+  <img alt="Vue" src="https://img.shields.io/badge/Vue-3.5-4FC08D?style=flat-square&logo=vuedotjs&logoColor=white">
+  <img alt="Vite" src="https://img.shields.io/badge/Vite-6-646CFF?style=flat-square&logo=vite&logoColor=white">
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5.6-3178C6?style=flat-square&logo=typescript&logoColor=white">
-  <img alt="Pinia" src="https://img.shields.io/badge/Pinia-3.0-FFD859?style=flat-square&logo=vue.js&logoColor=black">
-  <img alt="Vue Router" src="https://img.shields.io/badge/Vue%20Router-4.5-42B883?style=flat-square&logo=vuedotjs&logoColor=white">
-</p>
-<p>
   <img alt="Ant Design Vue" src="https://img.shields.io/badge/Ant%20Design%20Vue-4.2-0170FE?style=flat-square&logo=antdesign&logoColor=white">
   <img alt="D3.js" src="https://img.shields.io/badge/D3.js-7.9-F9A03C?style=flat-square&logo=d3dotjs&logoColor=white">
-  <img alt="xterm.js" src="https://img.shields.io/badge/xterm.js-6.0-2E3A46?style=flat-square&logo=gnometerminal&logoColor=white">
-  <img alt="Axios" src="https://img.shields.io/badge/Axios-1.18-5A29E4?style=flat-square&logo=axios&logoColor=white">
-  <img alt="Node" src="https://img.shields.io/badge/Node-20.15.0-339933?style=flat-square&logo=nodedotjs&logoColor=white">
+  <img alt="xterm.js" src="https://img.shields.io/badge/xterm.js-6-2E3A46?style=flat-square&logo=gnometerminal&logoColor=white">
 </p>
 
 </div>
 
-> 本模块是 git-arena 的前端子项目。项目整体愿景、架构与契约以仓库根目录 [`CLAUDE.md`](../CLAUDE.md) 为准，本文只讲前端。
+## 项目介绍
 
-## 核心理念
+git-arena 是一个面向 Git 学习和协作训练的交互式 Web 应用。它把真实 Git 操作拆解成可以观察、练习和复盘的过程：
 
-图形操作与命令行操作**走同一条执行链路、共用同一份状态模型**。终端敲 `git commit` 与点击面板按钮，最终都汇入 [`WorkbenchView`](src/views/WorkbenchView.vue) 的 `execute`，经 Pinia store 的 `exec` 调同一后端接口，再用后端返回的新快照刷新图与终端。**绝不允许图视图和终端各自维护状态**（`CLAUDE.md` §3 黄金法则）。
+- 在提交图中观察 commit、分支、标签、HEAD 和远程跟踪分支的变化。
+- 在终端中输入真实的 Git 命令，也可以使用图形化操作面板完成常用操作。
+- 通过关卡练习提交、分支、合并、变基、冲突、远程仓库和 Pull Request。
+- 在协作房间中与其他成员使用各自的克隆仓库，共同操作一个共享 origin。
 
-前端只持有后端返回的**只读快照**（GitGraph JSON，见 `CLAUDE.md` §5），不在本地"预测"仓库变化——一切以后端执行结果为准。
+前端负责展示界面、接收输入和呈现后端返回的仓库状态；Git 命令由后端沙盒执行。
 
-## 技术栈
+## 主要功能
 
-| 用途 | 选型 |
-|---|---|
-| 框架 | Vue 3（Composition API + `<script setup lang="ts">`） |
-| 构建 | Vite 6.x（锁定，勿升级到 7/8——受开发机 Node 20.15.0 约束） |
-| 语言 | TypeScript（强制） |
-| 状态 | Pinia |
-| 路由 | Vue Router |
-| 通用 UI | Ant Design Vue（应用外壳唯一来源，按需引入，禁止第二个组件库） |
-| 图可视化 | D3.js（自绘 commit DAG，确定性布局） |
-| 终端 | xterm.js（`@xterm/xterm` + `addon-fit`） |
-| HTTP | Axios（经 `api/` 封装层统一调用） |
+### 工作台
+
+工作台是默认首页，包含三个区域：
+
+- 提交图：以 DAG 形式展示当前仓库历史和引用关系。
+- 命令终端：支持命令输入、历史记录、中文输入、退格、复制粘贴和错误提示。
+- 操作面板：用按钮完成初始化、提交、创建分支、切换、合并、变基等常用操作。
+
+终端和操作面板会调用同一套后端命令接口，因此两种操作看到的是同一个仓库状态。
+
+### 关卡地图
+
+关卡地图按学习主题组织官方关卡，支持查看难度、完成状态、关卡说明和目标图。当前覆盖：
+
+- 基础操作：init、add、commit、log、tag、相对提交引用等。
+- 分支：创建、切换和分叉历史。
+- 合并：快进合并、三方合并、压缩合并和冲突处理。
+- 变基：普通变基和变基冲突解决。
+- 远程：fetch、pull、push 和推送被拒绝的处理。
+- 协作与 PR：多人房间、远程同步、PR 创建、评审和合并。
+
+### 协作房间
+
+进入“协作房间”后，可以创建房间或使用邀请码加入房间。房间页面提供：
+
+- 当前成员和在线状态。
+- “我的克隆”与共享 origin 的双提交图。
+- 成员终端和 Git 操作面板。
+- Pull Request 创建、评审、行级评论和合并。
+- 协作场景关卡的目标校验。
+
+### 关卡编辑器
+
+登录后可以在“关卡编辑器”中创建和编辑自定义关卡，包括：
+
+- 初始提交图、分支和工作区。
+- 目标图与校验条件。
+- 参考解步骤。
+- 分级提示。
+
+## 页面入口
+
+| 页面 | 地址 | 用途 |
+|---|---|---|
+| 工作台 | `/` | 自由沙盒、提交图、终端和操作面板 |
+| 协作房间 | `/rooms` | 创建或加入多人 Git 协作房间 |
+| 关卡编辑器 | `/level-editor` | 创建、编辑和发布自定义关卡 |
+| 登录 / 注册 | `/login` | 登录、注册或升级游客账号 |
 
 ## 环境要求
 
-- Node.js **20.15.0**（开发机锁定版本；`package.json` 也允许 22 / 24，但本项目以 20.15.0 为准）
-- 后端服务运行在 `http://localhost:8096`（Vite 已将 `/api` 代理到此，前端走同源免跨域）
+- Node.js 20.15.0 或更高版本
+- npm
+- 正常运行的 git-arena 后端服务
+
+开发服务器默认运行在 `http://localhost:5173`，并将 `/api` 请求代理到 `http://localhost:8096`。如果后端没有启动，页面仍可以打开，但会话、关卡和协作数据无法加载。
 
 ## 快速开始
 
-```sh
-npm install       # 安装依赖
-npm run dev       # 启动开发服务器（http://localhost:5173）
+在前端目录执行：
+
+```bash
+npm install
+npm run dev
 ```
 
-启动后打开工作台，会自动创建沙盒会话。可在终端试跑 M1 全链路：
+然后打开：
 
-```sh
-git init → touch a.txt → git add . → git commit -m "init" → git log
+```text
+http://localhost:5173
 ```
 
-## 常用脚本
+如果需要同时启动后端，可以在另一个终端进入后端模块目录：
 
-```sh
-npm run dev          # 开发服务器 + 热更新（端口 5173）
-npm run build        # 生产构建（先 type-check 再 vite build）
-npm run type-check   # 仅类型检查（vue-tsc）
-npm run preview      # 本地预览构建产物
+```bash
+cd ../git-arena
+mvn spring-boot:run
 ```
 
-> 提交前请确保 `npm run type-check` 通过（`CLAUDE.md` §8 自检清单）。
+首次启动后端前，请确保后端所需的 PostgreSQL 和其他服务已按项目环境配置启动。
 
-## 目录结构
+## 常用命令
 
+```bash
+# 安装依赖
+npm install
+
+# 启动开发服务器，支持热更新
+npm run dev
+
+# 类型检查并构建生产版本
+npm run build
+
+# 仅执行类型检查
+npm run type-check
+
+# 预览生产构建结果
+npm run preview
 ```
+
+## 使用流程
+
+### 开始一次自由练习
+
+1. 打开工作台首页。
+2. 等待沙盒会话创建完成。
+3. 在终端输入命令，例如：
+
+   ```text
+   git init
+   touch README.txt
+   git add README.txt
+   git commit -m "first commit"
+   git log
+   ```
+
+4. 在提交图中观察提交节点和 `HEAD` 的变化。
+
+### 开始一张关卡
+
+1. 在工作台点击“关卡地图”。
+2. 选择一张未完成的关卡。
+3. 阅读关卡说明和目标图。
+4. 使用终端或操作面板完成目标。
+5. 达到目标后，系统会自动校验并记录进度。
+
+### 练习多人协作
+
+1. 打开“协作房间”。
+2. 创建房间并复制邀请码，或输入队友的邀请码加入。
+3. 在自己的克隆中创建分支并提交修改。
+4. 使用 `git push` 将分支推送到共享 origin。
+5. 创建 Pull Request，邀请房间成员评审。
+6. 解决反馈或冲突后，再由房主合并 PR。
+
+## 项目结构
+
+```text
 src/
-  api/            # Axios 封装，一个后端资源一个文件
-    http.ts       #   请求实例与拦截器
-    sandbox.ts    #   会话/沙盒接口（创建、重置、读图）
-    command.ts    #   命令执行接口（终端与面板共用）
-  components/
-    graph/        # commit DAG 可视化（D3 自绘）
-      layout.ts   #   确定性布局：纯函数 GitGraph → 坐标
-      GitGraphView.vue
-    terminal/     # xterm.js 终端封装
-    panel/        # 图形化操作按钮面板
-  stores/
-    session.ts    # 会话与图状态（唯一 GitGraph 快照来源）
-  types/
-    gitGraph.ts   # GitGraph 契约类型（§5 的唯一前端来源）
-  views/
-    WorkbenchView.vue   # 工作台：图 + 终端 + 面板并存，命令唯一编排点
-  router/
+├─ api/                 # 后端接口封装
+├─ assets/              # 图片和静态资源
+├─ components/
+│  ├─ auth/             # 用户菜单和认证相关组件
+│  ├─ collab/           # 协作房间和 PR 评审组件
+│  ├─ editor/           # 关卡编辑器组件
+│  ├─ engagement/       # 积分、成就和成长中心
+│  ├─ graph/            # D3 提交图组件
+│  ├─ level/            # 关卡选择、目标图和提示组件
+│  ├─ panel/            # Git 操作面板
+│  └─ terminal/         # xterm.js 终端组件
+├─ router/              # 页面路由
+├─ stores/              # Pinia 状态管理
+├─ types/               # TypeScript 类型定义
+└─ views/               # 页面级组件
 ```
 
-## 开发约定（硬性）
+## 技术栈
 
-以下摘自 `CLAUDE.md` §6，改动前请通读该章：
+| 领域 | 技术 |
+|---|---|
+| 前端框架 | Vue 3 + Composition API |
+| 编程语言 | TypeScript |
+| 构建工具 | Vite 6 |
+| 状态管理 | Pinia |
+| 路由 | Vue Router |
+| UI 组件 | Ant Design Vue |
+| 提交图 | D3.js |
+| 终端 | xterm.js |
+| HTTP 请求 | Axios |
+| 协作通信 | STOMP + SockJS |
 
-- 一律 `<script setup lang="ts">` + Composition API，不写 Options API。
-- GitGraph 类型只在 [`types/gitGraph.ts`](src/types/gitGraph.ts) 定义，禁止在组件里散落重复定义。
-- 组件命名 PascalCase 多词（`GitGraphView.vue`，不要 `Graph.vue`）。
-- 业务逻辑抽到 composables；业务状态入 Pinia，禁止全局变量或 provide/inject 传业务状态。
-- 与后端交互一律走 `api/` 封装层，组件内不直接写 axios URL。
-- **面板动作必须转成与命令行等价的命令请求，走同一 API**（黄金法则）。
-- 通用 UI 一律用 Ant Design Vue（按需引入）；但 **DAG 与终端两个教学核心区不归 antd 管**——DAG 由 D3 自绘、终端由 xterm.js 承载，不要用 antd 包裹其内部渲染。
-- 主题定制统一走 `ConfigProvider` 的 design token，禁止散落覆盖 `.ant-*` 类名。
+## 常见问题
 
-### 图可视化约束（`CLAUDE.md` §6.3）
+### 页面打开了，但一直显示会话创建失败
 
-- **布局必须是纯函数**：同一份 GitGraph JSON 永远产出同一张图；**禁止力导向布局**（位置需可复现，且关卡要把"当前图"与"目标图"并排对照）。
-- **动画由快照 diff 驱动**，以 commit id 为 key，禁止依赖数组下标。
-- 当前阶段（M1/M2）只需保证两个地基：**布局确定性、节点 key 稳定**；动画本体属 P2，地基打对后随时可加。
+确认后端是否运行在 `8096` 端口，并检查浏览器开发者工具中的 `/api` 请求是否能够返回。
 
-## 当前进度
+### 协作房间无法连接或成员状态不刷新
 
-**M1 骨架**（`init/add/commit/log` 全链路）：单沙盒会话、D3 提交图 + xterm 终端 + 图形面板并存、命令与面板同一执行链路已跑通。
+协作房间除了 REST 接口，还需要 WebSocket 代理正常工作。开发环境下 Vite 已配置 `/ws` 代理到后端 `8096` 端口。
 
-后续按 `CLAUDE.md` §11 路线图迭代：M2 单人可玩（分支/合并/关卡系统）→ M3 协作（远程模拟、多人房间、冲突与 PR）→ M4 打磨（动画、成就、提示、自由沙盒）。
+### 登录后仍然看不到进度
 
-## 相关文档
+确认浏览器没有禁用本地存储，并重新刷新页面。游客可以体验功能，但登录后才能保存关卡进度、积分和成就。
 
-- 项目宪法与整体架构：[`CLAUDE.md`](../CLAUDE.md)
-- GitGraph 前后端契约：`CLAUDE.md` §5 + [`src/types/gitGraph.ts`](src/types/gitGraph.ts)
-- 数据库边界：`database.md`
-- 关卡规格：`docs/level-spec.md`
-```
+## 相关模块
+
+- 后端模块：[`../git-arena`](../git-arena)
+- 项目根目录：[`..`](..)

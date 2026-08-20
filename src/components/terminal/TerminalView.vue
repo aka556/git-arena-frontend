@@ -25,6 +25,15 @@ let currentCwd = '~'
 let accepting = true // 命令执行期间暂停接收输入
 
 const CLEAR_SEQUENCE = '\x1b[2J\x1b[H'
+interface GraphemeSegmenter {
+  segment(value: string): Iterable<{ segment: string }>
+}
+const Segmenter = (Intl as unknown as {
+  Segmenter?: new (locale?: string, options?: { granularity: 'grapheme' }) => GraphemeSegmenter
+}).Segmenter
+const graphemeSegmenter = Segmenter
+  ? new Segmenter(undefined, { granularity: 'grapheme' })
+  : null
 
 function prompt(): string {
   return `\x1b[36marena:${currentCwd || '~'}$\x1b[0m `
@@ -41,70 +50,176 @@ function clearLine(): void {
   writePrompt()
 }
 
-function onData(data: string): void {
-  if (!term || !accepting) return
-
-  if (data === '\r') {
-    term.write('\r\n')
-    const line = current.trim()
-    current = ''
-    historyIdx = -1
-    if (line.length === 0) {
-      writePrompt()
-      return
-    }
-    history.unshift(line)
-    accepting = false // 等 writeResult/writeError 回来再放行
-    emit('submit', line)
-    return
+function splitGraphemes(value: string): string[] {
+  if (graphemeSegmenter) {
+    return Array.from(graphemeSegmenter.segment(value), ({ segment }) => segment)
   }
+  return Array.from(value)
+}
 
-  if (data === '\x7f' || data === '\b') {
-    // Backspace / DEL
-    if (current.length > 0) {
-      current = current.slice(0, -1)
-      term.write('\b \b')
-    }
-    return
-  }
+/** xterm 单元格宽度：组合符为 0，CJK/全角/emoji 为 2，其余为 1。 */
+function codePointCellWidth(codePoint: number): 0 | 1 | 2 {
+  if (
+    codePoint === 0
+    || codePoint === 0x200d
+    || (codePoint >= 0x0300 && codePoint <= 0x036f)
+    || (codePoint >= 0x1ab0 && codePoint <= 0x1aff)
+    || (codePoint >= 0x1dc0 && codePoint <= 0x1dff)
+    || (codePoint >= 0x20d0 && codePoint <= 0x20ff)
+    || (codePoint >= 0xfe00 && codePoint <= 0xfe0f)
+    || (codePoint >= 0xfe20 && codePoint <= 0xfe2f)
+    || (codePoint >= 0x1f3fb && codePoint <= 0x1f3ff)
+    || (codePoint >= 0xe0100 && codePoint <= 0xe01ef)
+  ) return 0
 
-  if (data === '\x03') {
-    // Ctrl+C：放弃当前行
-    term.write('^C\r\n')
-    current = ''
+  if (
+    codePoint >= 0x1100 && (
+      codePoint <= 0x115f
+      || codePoint === 0x2329
+      || codePoint === 0x232a
+      || (codePoint >= 0x2e80 && codePoint <= 0xa4cf && codePoint !== 0x303f)
+      || (codePoint >= 0xac00 && codePoint <= 0xd7a3)
+      || (codePoint >= 0xf900 && codePoint <= 0xfaff)
+      || (codePoint >= 0xfe10 && codePoint <= 0xfe19)
+      || (codePoint >= 0xfe30 && codePoint <= 0xfe6f)
+      || (codePoint >= 0xff00 && codePoint <= 0xff60)
+      || (codePoint >= 0xffe0 && codePoint <= 0xffe6)
+      || (codePoint >= 0x1f000 && codePoint <= 0x1faff)
+      || (codePoint >= 0x20000 && codePoint <= 0x3fffd)
+    )
+  ) return 2
+
+  return 1
+}
+
+function graphemeCellWidth(grapheme: string): number {
+  // 一个字素（组合字符、ZWJ emoji、旗帜）最多占 2 列，取其中最宽码点即可。
+  return Math.max(1, ...Array.from(grapheme, (char) => codePointCellWidth(char.codePointAt(0)!)))
+}
+
+function eraseLastGrapheme(): void {
+  if (!term || current.length === 0) return
+  const graphemes = splitGraphemes(current)
+  const removed = graphemes.pop()
+  if (!removed) return
+  current = graphemes.join('')
+  term.write('\b \b'.repeat(graphemeCellWidth(removed)))
+}
+
+function submitCurrent(): void {
+  if (!term) return
+  term.write('\r\n')
+  const line = current.trim()
+  current = ''
+  historyIdx = -1
+  if (line.length === 0) {
     writePrompt()
     return
   }
+  history.unshift(line)
+  accepting = false // 等 writeResult/writeError 回来再放行
+  emit('submit', line)
+}
 
-  if (data === '\x1b[A') {
-    // ↑ 历史
-    if (history.length > 0) {
-      historyIdx = Math.min(historyIdx + 1, history.length - 1)
-      current = history[historyIdx] ?? ''
-      clearLine()
-      term.write(current)
-    }
-    return
-  }
-  if (data === '\x1b[B') {
-    // ↓ 历史
-    if (historyIdx > 0) {
-      historyIdx -= 1
-      current = history[historyIdx] ?? ''
-    } else {
-      historyIdx = -1
-      current = ''
-    }
-    clearLine()
-    term.write(current)
-    return
-  }
+function appendText(text: string): void {
+  if (!term || !text) return
+  current += text
+  term.write(text)
+}
 
-  // 过滤其它控制序列，仅接收可见字符
-  // eslint-disable-next-line no-control-regex
-  if (/[\x00-\x1f]/.test(data)) return
-  current += data
-  term.write(data)
+function showPreviousHistory(): void {
+  if (!term || history.length === 0) return
+  historyIdx = Math.min(historyIdx + 1, history.length - 1)
+  current = history[historyIdx] ?? ''
+  clearLine()
+  term.write(current)
+}
+
+function showNextHistory(): void {
+  if (!term) return
+  if (historyIdx > 0) {
+    historyIdx -= 1
+    current = history[historyIdx] ?? ''
+  } else {
+    historyIdx = -1
+    current = ''
+  }
+  clearLine()
+  term.write(current)
+}
+
+function abortCurrent(): void {
+  if (!term) return
+  term.write('^C\r\n')
+  current = ''
+  historyIdx = -1
+  writePrompt()
+}
+
+/**
+ * xterm 的 IME 可能把“已确认的中文 + 回车”放在同一次 onData 回调中。
+ * 因此不能因数据里含控制字符就整段丢弃，必须按顺序消费可见文本与控制序列。
+ */
+function onData(data: string): void {
+  if (!term || !accepting) return
+
+  let index = 0
+  while (index < data.length && accepting) {
+    const rest = data.slice(index)
+
+    if (rest.startsWith('\x1b[A')) {
+      showPreviousHistory()
+      index += 3
+      continue
+    }
+    if (rest.startsWith('\x1b[B')) {
+      showNextHistory()
+      index += 3
+      continue
+    }
+
+    const codePoint = data.codePointAt(index)!
+    const char = String.fromCodePoint(codePoint)
+
+    if (char === '\r' || char === '\n') {
+      submitCurrent()
+      index += char.length
+      continue
+    }
+
+    if (char === '\x7f' || char === '\b') {
+      eraseLastGrapheme()
+      index += char.length
+      continue
+    }
+
+    if (char === '\x03') {
+      abortCurrent()
+      index += char.length
+      continue
+    }
+
+    if (char === '\x1b') {
+      // 当前行编辑尚不支持左右移动等序列；完整吞掉，避免残片被当作可见输入。
+      const sequence = rest.match(/^\x1b(?:\[[0-9;?]*[ -/]*[@-~]|.)/)?.[0]
+      index += sequence?.length ?? char.length
+      continue
+    }
+
+    if (codePoint < 0x20) {
+      index += char.length
+      continue
+    }
+
+    let end = index + char.length
+    while (end < data.length) {
+      const next = data.codePointAt(end)!
+      if (next < 0x20 || next === 0x7f) break
+      end += String.fromCodePoint(next).length
+    }
+    appendText(data.slice(index, end))
+    index = end
+  }
 }
 
 /** 写回命令结果并给出新提示符（由上层在 store.exec 完成后调用）。 */
@@ -143,7 +258,7 @@ function writeResult(res: CommandResponse): void {
 /** 写回错误（网络/异常）并恢复输入。 */
 function writeError(message: string): void {
   if (!term) return
-  writeStderr(message)
+  writeStderr(`错误：${message || '命令执行失败'}`)
   accepting = true
   writePrompt()
 }
